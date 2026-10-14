@@ -55,11 +55,47 @@ report::Timed::~Timed()
                              std::chrono::steady_clock::now() - began).count()));
 }
 
+namespace
+{
+    void WriteLocked(const char* window);
+
+    // MW2_REPORT_EVERY=<seconds>: the report for each stretch of that many
+    // seconds as it ends, as well as at exit. An iPad app is rarely quit, it
+    // is put away and killed, so its only report is the ones made on the way.
+    double Every()
+    {
+        static const double every = double(env::Number("MW2_REPORT_EVERY"));
+        return every;
+    }
+    std::chrono::steady_clock::time_point g_windowStart;
+
+    void ResetWindow()
+    {
+        s.intervals = 0;
+        std::fill(std::begin(s.buckets), std::end(s.buckets), 0);
+        s.intervalMs = s.longestMs = 0;
+        std::fill(std::begin(s.spentInPlay), std::end(s.spentInPlay), 0);
+        std::fill(std::begin(s.costCount), std::end(s.costCount), 0);
+        std::fill(std::begin(s.costMicroseconds), std::end(s.costMicroseconds), 0);
+        std::fill(std::begin(s.costLongest), std::end(s.costLongest), 0);
+    }
+}
+
 void report::Frame(bool world)
 {
     if (!On()) return;
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard lock(s.lock);
+    if (Every() > 0)
+    {
+        if (g_windowStart == std::chrono::steady_clock::time_point{}) g_windowStart = now;
+        else if (std::chrono::duration<double>(now - g_windowStart).count() >= Every())
+        {
+            WriteLocked("the last stretch");
+            ResetWindow();
+            g_windowStart = now;
+        }
+    }
     if (!s.frames) s.first = now;
     s.frames++;
     uint64_t spent[kTimeCount];
@@ -107,6 +143,17 @@ void report::Write()
     std::lock_guard lock(s.lock);
     if (s.written) return;
     s.written = true;
+    WriteLocked(Every() > 0 ? "the last stretch" : nullptr);
+}
+
+namespace
+{
+void WriteLocked(const char* window)
+{
+    using namespace report;
+    if (window)
+        LOGI("report: -- %s (%.0f s) --", window,
+             std::chrono::duration<double>(s.last - g_windowStart).count());
     const double seconds = s.frames ? std::chrono::duration<double>(s.last - s.first).count() : 0.0;
     LOGI("report: %llu frames in %.0f s, %llu of them of the world", (unsigned long long)s.frames, seconds,
          (unsigned long long)s.worldFrames);
@@ -130,4 +177,5 @@ void report::Write()
          (unsigned long long)(s.costLongest[kShader] / 1000), (unsigned long long)s.costCount[kPipeline],
          (unsigned long long)(s.costMicroseconds[kPipeline] / 1000),
          (unsigned long long)(s.costLongest[kPipeline] / 1000));
+}
 }

@@ -163,6 +163,20 @@ static int GuestMain(int argc, char** argv)
 
     // Before any switch is read, the log's among them.
     const std::string kept = settings::Load(install::Folder(argc, argv) / ".env");
+#ifdef __APPLE__
+    // Metal may spread one pipeline's compilation over more of its threads
+    // (macOS 13.3, iOS 16.4), which the pipeline compilers want
+    // (renderer_pipelines.cpp). Read by MoltenVK when the instance is made.
+    setenv("MVK_CONFIG_SHOULD_MAXIMIZE_CONCURRENT_COMPILATION", "1", 0);
+    // A player's copy keeps what it compiled, beside its game folder. MoltenVK
+    // has no pipeline libraries, so every pipeline is otherwise compiled at its
+    // first draw -- the hitches of a first run, every run.
+    if (install::PlayerStart(argc, argv))
+    {
+        setenv("MW2_SHADER_CACHE", "shaders.cache", 0);
+        setenv("MW2_PIPELINE_CACHE", "pipelines.cache", 0);
+    }
+#endif
 
     // MW2_LOG_FILE=<path> sends the log there instead of the terminal. Every
     // line this runtime writes goes to stderr, so a plain `> file` redirection

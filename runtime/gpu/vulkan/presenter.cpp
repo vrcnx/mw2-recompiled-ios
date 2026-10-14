@@ -1,4 +1,7 @@
 #include "presenter.h"
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include "../../diagnostics.h"
 #include "../../env.h"
 #include "../../frame_rate.h"
@@ -8,6 +11,7 @@
 #include "../../stutters.h"
 #include "../../signin.h"
 #include "../../online/service.h"
+#include "../../display_shape.h"
 
 #if !defined(MW2_HAVE_VULKAN) || !defined(MW2_USE_SDL)
 // Without a loader or a window system there is nothing to present to; the rest
@@ -451,6 +455,14 @@ namespace
     // squashed, and the window can be any shape at all.
     void Letterbox(uint32_t frameWidth, uint32_t frameHeight, VkOffset3D& from, VkOffset3D& to)
     {
+        // A title told its display is 4:3 drew for one into its 16:9 buffer,
+        // which the console's scaler stretched to the set: so does this.
+        if (display::FourByThree())
+        {
+            from = { 0, 0, 0 };
+            to = { int32_t(g.extent.width), int32_t(g.extent.height), 1 };
+            return;
+        }
         const uint64_t byWidth = uint64_t(g.extent.width) * frameHeight;
         const uint64_t byHeight = uint64_t(g.extent.height) * frameWidth;
         uint32_t width = g.extent.width, height = g.extent.height;
@@ -485,6 +497,18 @@ namespace
         {
             g.nominalNs = g.periodNs;
             LOGI("vulkan: the display runs at %.4f Hz; the guest's blank follows it", hz);
+        }
+        // A ProMotion panel (the iPad's) at 120 Hz, or any whole multiple of
+        // 60: the guest's blank follows every second (third...) of its blanks,
+        // where on its own clock it drifted against them and a frame was now
+        // and then held a blank longer or let go a blank early.
+        else if (const double ratio = std::round(hz / 60.0);
+                 ratio >= 2 && std::fabs(hz - 60.0 * ratio) <= ratio)
+        {
+            g.periodNs *= ratio;
+            g.nominalNs = g.periodNs;
+            LOGI("vulkan: the display runs at %.3f Hz; the guest's blank follows every %.0f of its blanks",
+                 hz, ratio);
         }
         else
             LOGI("vulkan: the display runs at %.3f Hz, not 60; the guest's blank keeps its own"
@@ -1042,6 +1066,9 @@ namespace
                 queued = !g.frameQueue.empty();
             }
             if (!g.running) break;
+            // In the background nothing may reach the GPU; the frames waiting
+            // are let go, as for a hidden window (WaitUntilTaken).
+            if (vk::pipeline::SubmissionSuspended()) continue;
             if (queued) DrawOneFrame(false);
             else if (!g.presented.load(std::memory_order_relaxed)) DrawOneFrame(true);
         }
@@ -1062,6 +1089,30 @@ namespace
     bool g_presenterDone = false;
 }
 
+#if TARGET_OS_IOS
+namespace
+{
+    // Called from UIKit's own notifications, before they return: a queued
+    // event would arrive after the app had gone, its GPU work refused.
+    bool SDLCALL WatchTheApp(void*, SDL_Event* event)
+    {
+        switch (event->type)
+        {
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+            vk::renderer::SaveCachesSoon();
+            vk::pipeline::SuspendSubmission();
+            break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            vk::pipeline::ResumeSubmission();
+            break;
+        default:
+            break;
+        }
+        return true;
+    }
+}
+#endif
+
 [[noreturn]] void vk::RunMainThread()
 {
     crash::RegisterThread("main thread (window)");
@@ -1070,6 +1121,9 @@ namespace
     // (kernel/input.cpp leaves SDL_UpdateGamepads to it).
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
         LOGW("vulkan: SDL would not start on the main thread (%s)", SDL_GetError());
+#if TARGET_OS_IOS
+    SDL_AddEventWatch(WatchTheApp, nullptr);
+#endif
     for (;;)
     {
         if (g_mainAsked.exchange(false, std::memory_order_acq_rel))

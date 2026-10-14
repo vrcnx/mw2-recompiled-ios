@@ -284,6 +284,7 @@ namespace vk::renderer::detail
         stutters::Finished(g.frames, worldDrawn);
         report::Frame(worldDrawn);
         NoteFrame(worldDrawn);
+        PersistCaches();
         if (worldDrawn)
         {
             const auto now = std::chrono::steady_clock::now();

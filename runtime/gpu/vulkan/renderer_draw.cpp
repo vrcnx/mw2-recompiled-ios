@@ -485,15 +485,16 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     key.blendControl = r[gpu::RB_BLENDCONTROL0];
     key.colourMask = r[gpu::RB_COLOR_MASK];
     key.samples = colourTarget->samples;
-    bool newPipeline = false;
+    bool newPipeline = false, later = false;
     VkPipeline built = [&] { Stopwatch watch(g.pipelineNanoseconds);
-                             return EnsurePipeline(key, *vertex, *pixel, &newPipeline); }();
-    if (!built) { Skip("pipeline rejected"); return; }
+                             return EnsurePipeline(key, *vertex, *pixel, &newPipeline, &later); }();
+    // Recorded when first asked for, whether it is ready yet or not.
     if (newPipeline && ShaderCachePath())
         g.recorded.push_back({ key.vertexShader, key.pixelShader,
                                uint32_t(colourTarget->format), uint32_t(depthTarget->format),
                                key.topology, depthControl, key.blendControl,
                                key.colourMask, modeCntl, key.samples });
+    if (!built) { Skip(later ? "pipeline compiling" : "pipeline rejected"); return; }
 
     // What each slot is declared as, so a texture of another kind is not bound
     // there. The two stages share the set; where both sample a slot the pixel

@@ -324,6 +324,7 @@ void vk::renderer::Shutdown()
     vk::record::Stop();
     vkDeviceWaitIdle(g.device);
     StopPreparing();
+    StopAsyncPipelines();
     vk::display::Shutdown();
     WriteShaderCache();
     SummariseTargets();

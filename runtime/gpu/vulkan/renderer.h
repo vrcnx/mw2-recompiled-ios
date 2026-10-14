@@ -98,4 +98,8 @@ namespace vk::renderer
     void BeforeCompletion();
 
     void Report();
+    // Writes the pipeline caches at the next frame, whatever was built since
+    // they were last written: the app is going to the background, where it
+    // may be killed without a word.
+    void SaveCachesSoon();
 }

@@ -677,10 +677,16 @@ namespace vk::renderer::detail
     // The culling and winding PA_SU_SC_MODE_CNTL asks for.
     void FacesFor(uint32_t modeCntl, VkCullModeFlags& cull, VkFrontFace& front);
     // `made` says whether this call built it.
+    // `later`, given, lets it be compiled off the draw (AsyncPipelines): null
+    // comes back, `*later` set, until it is ready.
     VkPipeline EnsurePipeline(const PipelineKey& key, const Shader& vertex, const Shader& pixel,
-                              bool* made = nullptr);
+                              bool* made = nullptr, bool* later = nullptr);
+    // Before the pipelines are destroyed: the compilers finish what they hold.
+    void StopAsyncPipelines();
     const char* ShaderCachePath();
     void WriteShaderCache();
+    // Once a frame: writes both caches when there is something new to keep.
+    void PersistCaches();
     void PrewarmFromCache();
 
     // ---- renderer_draw.cpp ----

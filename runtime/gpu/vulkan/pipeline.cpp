@@ -21,6 +21,9 @@ float    vk::pipeline::MaxAnisotropy() { return 1.0f; }
 bool     vk::pipeline::NonSeamlessCubes() { return false; }
 bool     vk::pipeline::PipelineLibraries() { return false; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
+void     vk::pipeline::SuspendSubmission() {}
+void     vk::pipeline::ResumeSubmission() {}
+bool     vk::pipeline::SubmissionSuspended() { return false; }
 void*    vk::pipeline::SetLayout(uint32_t) { return nullptr; }
 void*    vk::pipeline::Layout() { return nullptr; }
 void*    vk::pipeline::Cache() { return nullptr; }
@@ -441,11 +444,15 @@ namespace
         if (vkGetPipelineCacheData(g.device, g.cache, &size, nullptr) != VK_SUCCESS || !size) return;
         std::vector<uint8_t> data(size);
         if (vkGetPipelineCacheData(g.device, g.cache, &size, data.data()) != VK_SUCCESS) return;
-        if (std::FILE* f = std::fopen(path, "wb"))
+        // Beside it first, then over it: a run killed mid-write keeps the last.
+        const std::string partial = std::string(path) + ".partial";
+        if (std::FILE* f = std::fopen(partial.c_str(), "wb"))
         {
-            std::fwrite(data.data(), 1, size, f);
-            std::fclose(f);
-            LOGI("pipeline: wrote %zu KB of pipeline cache to %s", size / 1024, path);
+            const bool written = std::fwrite(data.data(), 1, size, f) == size;
+            if (std::fclose(f) == 0 && written && std::rename(partial.c_str(), path) == 0)
+                LOGI("pipeline: wrote %zu KB of pipeline cache to %s", size / 1024, path);
+            else
+                std::remove(partial.c_str());
         }
     }
 
@@ -504,6 +511,11 @@ bool vk::pipeline::Initialise(void* device, void* physical, void* queue, uint32_
     return true;
 }
 
+void vk::pipeline::Persist()
+{
+    if (g.device) SaveCache();
+}
+
 void vk::pipeline::Shutdown()
 {
     if (!g.device) return;
@@ -542,6 +554,34 @@ bool     vk::pipeline::PipelineLibraries()
     return g.pipelineLibraries && g.fastLinking && !refused;
 }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
+
+namespace
+{
+    std::unique_lock<std::mutex> g_suspension(vk::pipeline::QueueMutex(), std::defer_lock);
+    std::atomic<bool> g_suspended{ false };
+}
+
+void vk::pipeline::SuspendSubmission()
+{
+    if (g_suspended.load()) return;
+    // Waits for a submission under way, then for all the work already given
+    // to the GPU: work still running when iOS backgrounds the app is cut off,
+    // which can leave the device unusable on the way back.
+    g_suspension.lock();
+    if (g.queue) vkQueueWaitIdle(g.queue);
+    g_suspended = true;
+    LOGI("vulkan: in the background; GPU work waits for the app to come back");
+}
+
+void vk::pipeline::ResumeSubmission()
+{
+    if (!g_suspended.exchange(false)) return;
+    g_suspension.unlock();
+    LOGI("vulkan: back in the foreground");
+}
+
+bool vk::pipeline::SubmissionSuspended() { return g_suspended.load(std::memory_order_relaxed); }
+
 void*    vk::pipeline::SetLayout(uint32_t set) { return set < 3 ? g.sets[set] : nullptr; }
 void*    vk::pipeline::Layout() { return g.layout; }
 void*    vk::pipeline::Cache() { return g.cache; }

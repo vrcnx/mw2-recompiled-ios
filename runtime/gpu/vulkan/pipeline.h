@@ -55,6 +55,15 @@ namespace vk::pipeline
     // submit to it; Vulkan requires a queue to be externally synchronised.
     std::mutex& QueueMutex();
 
+    // iOS refuses GPU work from an app in the background, and the refusal is
+    // a lost device: the run ends. On the way out the queue is drained and
+    // held (QueueMutex), so every thread that would submit waits until the
+    // app is back, which also stops the title where it stands. On the main
+    // thread only, which must not draw while suspended. Unused elsewhere.
+    void SuspendSubmission();
+    void ResumeSubmission();
+    bool SubmissionSuspended();
+
     // A VkResult that is not VK_SUCCESS. VK_ERROR_DEVICE_LOST also ends the run,
     // once, saying so: after the driver resets the GPU nothing submitted again
     // will finish, and a window left waiting on it stops answering its close
@@ -69,6 +78,8 @@ namespace vk::pipeline
     void* SetLayout(uint32_t set);
     void* Layout();
     void* Cache();
+    // Writes the driver's pipeline cache to MW2_PIPELINE_CACHE now. Any thread.
+    void Persist();
 
     // Creates and destroys a shader module: a stronger check than spirv-val,
     // because it is the compiler that will actually run the shader.

@@ -4,8 +4,21 @@
 #include "../../diagnostics.h"
 #include "../../log.h"
 #include "../../report.h"
+#include "../../crash.h"
+#include "../../env.h"
+#include "../../platform.h"
 
+#include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstdio>
+#include <cstring>
+#include <deque>
+#include <mutex>
+#include <unordered_set>
+#include <string>
+#include <thread>
+#include <vector>
 
 #ifdef MW2_HAVE_VULKAN
 
@@ -220,17 +233,18 @@ namespace vk::renderer::detail
     }
 
     // The whole pipeline in one call, both shaders compiled for it: what a
-    // device without pipeline libraries gets.
-    VkPipeline BuildPipeline(const PipelineKey& key, const Shader& vertex, const Shader& pixel)
+    // device without pipeline libraries gets. Any thread: it reads nothing but
+    // its arguments, the device, the layout and the cache.
+    VkPipeline BuildPipeline(const PipelineKey& key, VkShaderModule vertexModule, VkShaderModule pixelModule)
     {
         VkPipelineShaderStageCreateInfo stages[2]{};
         stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        stages[0].module = vertex.module;
+        stages[0].module = vertexModule;
         stages[0].pName = "main";
         stages[1] = stages[0];
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        stages[1].module = pixel.module;
+        stages[1].module = pixelModule;
 
         const PipelineState state(key);
         VkGraphicsPipelineCreateInfo info{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
@@ -254,12 +268,157 @@ namespace vk::renderer::detail
         return built;
     }
 
+    VkPipeline BuildPipeline(const PipelineKey& key, const Shader& vertex, const Shader& pixel)
+    {
+        return BuildPipeline(key, vertex.module, pixel.module);
+    }
+
+    // Pipelines compiled off the draw. Without pipeline libraries (MoltenVK)
+    // a pipeline is both shaders compiled for Metal, a quarter of a second to
+    // more than one apiece on Apple's chips: a frame that met five new ones
+    // stopped the game for a second, and a match's first minute met 150. So a
+    // draw that needs one asks for it and is skipped, the way Xenia's
+    // asynchronous shaders skip it, and the pipeline is ready a few frames
+    // later -- something new on screen appears a moment late, the first time
+    // only (the caches keep it). MW2_ASYNC_PIPELINES=0 compiles at the draw
+    // again; =1 asks for this on a device with libraries too. On by default on
+    // Apple's systems.
+    bool AsyncPipelines()
+    {
+        static const bool on = [] {
+            if (const char* value = env::Text("MW2_ASYNC_PIPELINES")) return std::strcmp(value, "0") != 0;
+#ifdef __APPLE__
+            return !vk::pipeline::PipelineLibraries();
+#else
+            return false;
+#endif
+        }();
+        return on;
+    }
+
+    namespace
+    {
+        struct AsyncJob
+        {
+            PipelineKey key;
+            VkShaderModule vertex = VK_NULL_HANDLE, pixel = VK_NULL_HANDLE;
+        };
+        struct AsyncCompiles
+        {
+            std::mutex lock;
+            std::condition_variable wake;
+            std::deque<AsyncJob> jobs;
+            std::vector<std::pair<PipelineKey, VkPipeline>> finished;
+            std::atomic<bool> anyFinished{ false };
+            bool stopping = false;
+            std::vector<platform::GuestThread> workers;
+            // The renderer's thread's own: asked for and not taken back yet.
+            std::unordered_set<PipelineKey, WordsHash> pending;
+            std::atomic<uint64_t> compileMicroseconds{ 0 }, longestMicroseconds{ 0 };
+            uint64_t asked = 0, skippedDraws = 0;
+        } a;
+
+        void CompileForDraws()
+        {
+            crash::RegisterThread("pipeline compiler");
+            for (;;)
+            {
+                AsyncJob job;
+                {
+                    std::unique_lock held(a.lock);
+                    a.wake.wait(held, [] { return a.stopping || !a.jobs.empty(); });
+                    if (a.jobs.empty()) return;   // stopping
+                    // The newest first: what was asked for last is what is on
+                    // screen now.
+                    job = a.jobs.back();
+                    a.jobs.pop_back();
+                }
+                const auto start = std::chrono::steady_clock::now();
+                const VkPipeline built = BuildPipeline(job.key, job.vertex, job.pixel);
+                const uint64_t took = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+                a.compileMicroseconds.fetch_add(took, std::memory_order_relaxed);
+                uint64_t longest = a.longestMicroseconds.load(std::memory_order_relaxed);
+                while (took > longest && !a.longestMicroseconds.compare_exchange_weak(longest, took)) {}
+                std::lock_guard held(a.lock);
+                a.finished.push_back({ job.key, built });
+                a.anyFinished.store(true, std::memory_order_release);
+            }
+        }
+
+        void TakeAsyncPipelines()
+        {
+            if (!a.anyFinished.load(std::memory_order_acquire)) return;
+            std::vector<std::pair<PipelineKey, VkPipeline>> finished;
+            {
+                std::lock_guard held(a.lock);
+                finished.swap(a.finished);
+                a.anyFinished.store(false, std::memory_order_relaxed);
+            }
+            for (auto& [key, built] : finished)
+            {
+                a.pending.erase(key);
+                if (!built)
+                    LOGW("renderer: pipeline for %016llX/%016llX rejected",
+                         (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader);
+                g.pipelines[key] = built;   // a failure is remembered, so it fails once
+            }
+        }
+
+        void AskFor(const PipelineKey& key, const Shader& vertex, const Shader& pixel)
+        {
+            if (a.workers.empty())
+            {
+                // Metal compiles a pipeline on one thread; a few at once keep
+                // up with what a new area brings.
+                const unsigned threads = std::clamp(std::thread::hardware_concurrency() / 3, 2u, 4u);
+                for (unsigned i = 0; i < threads; i++) a.workers.emplace_back(CompileForDraws);
+                LOGI("renderer: pipelines are compiled on %u threads of their own, and a draw"
+                     " waiting for one is skipped (MW2_ASYNC_PIPELINES)", threads);
+            }
+            a.pending.insert(key);
+            a.asked++;
+            std::lock_guard held(a.lock);
+            a.jobs.push_back({ key, vertex.module, pixel.module });
+            a.wake.notify_one();
+        }
+    }
+
+    void StopAsyncPipelines()
+    {
+        {
+            std::lock_guard held(a.lock);
+            a.stopping = true;
+            a.jobs.clear();
+        }
+        a.wake.notify_all();
+        for (platform::GuestThread& worker : a.workers) worker.join();
+        a.workers.clear();
+        TakeAsyncPipelines();
+        if (a.asked)
+            LOGI("renderer: %llu pipelines compiled off the draw in %llu ms (the longest %llu ms);"
+                 " %llu draws waited for one",
+                 (unsigned long long)a.asked, (unsigned long long)(a.compileMicroseconds.load() / 1000),
+                 (unsigned long long)(a.longestMicroseconds.load() / 1000),
+                 (unsigned long long)a.skippedDraws);
+    }
+
     VkPipeline EnsurePipeline(const PipelineKey& key, const Shader& vertex, const Shader& pixel,
-                              bool* made)
+                              bool* made, bool* later)
     {
         TakeOptimisedPipelines();
+        TakeAsyncPipelines();
         auto found = g.pipelines.find(key);
         if (found != g.pipelines.end()) return found->second;
+        if (later && AsyncPipelines())
+        {
+            *later = true;
+            a.skippedDraws++;
+            if (a.pending.count(key)) return VK_NULL_HANDLE;
+            if (made) *made = true;
+            AskFor(key, vertex, pixel);
+            return VK_NULL_HANDLE;
+        }
         if (made) *made = true;
 
         const auto compileStart = std::chrono::steady_clock::now();
@@ -295,28 +454,82 @@ namespace vk::renderer::detail
     constexpr uint32_t kCacheVersion = 3;   // 3: a vertex program ends by turning
                                             // window coordinates into clip space
 
-    void WriteShaderCache()
+    // The cache as it would be written: on the renderer's thread, which owns
+    // what goes in it.
+    std::vector<uint8_t> SerialiseShaderCache()
     {
-        const char* path = ShaderCachePath();
-        if (!path || g.recorded.empty()) return;
-        std::FILE* file = std::fopen(path, "wb");
-        if (!file) return;
-
+        std::vector<uint8_t> out;
+        auto put = [&out](const void* data, size_t bytes) {
+            const auto* at = static_cast<const uint8_t*>(data);
+            out.insert(out.end(), at, at + bytes);
+        };
         const uint32_t header[4] = { kCacheMagic, kCacheVersion,
                                      uint32_t(g.shaders.size()), uint32_t(g.recorded.size()) };
-        std::fwrite(header, sizeof header, 1, file);
+        put(header, sizeof header);
         for (const auto& [hash, shader] : g.shaders)
         {
             const uint32_t entry[2] = { uint32_t(shader.type == shader::Type::Pixel),
                                         uint32_t(shader.code.size()) };
-            std::fwrite(&hash, sizeof hash, 1, file);
-            std::fwrite(entry, sizeof entry, 1, file);
-            std::fwrite(shader.code.data(), 4, shader.code.size(), file);
+            put(&hash, sizeof hash);
+            put(entry, sizeof entry);
+            put(shader.code.data(), 4 * shader.code.size());
         }
-        std::fwrite(g.recorded.data(), sizeof(Recorded), g.recorded.size(), file);
-        std::fclose(file);
-        LOGI("renderer: wrote %zu shaders and %zu pipelines to %s",
-             g.shaders.size(), g.recorded.size(), path);
+        put(g.recorded.data(), sizeof(Recorded) * g.recorded.size());
+        return out;
+    }
+
+    // Beside the file and then over it, so a run killed while it writes --
+    // which is how an iPad app ends -- leaves the last whole one.
+    bool WriteWhole(const char* path, const std::vector<uint8_t>& data)
+    {
+        const std::string partial = std::string(path) + ".partial";
+        std::FILE* file = std::fopen(partial.c_str(), "wb");
+        if (!file) return false;
+        const bool written = std::fwrite(data.data(), 1, data.size(), file) == data.size();
+        if (std::fclose(file) != 0 || !written) { std::remove(partial.c_str()); return false; }
+        return std::rename(partial.c_str(), path) == 0;
+    }
+
+    void WriteShaderCache()
+    {
+        const char* path = ShaderCachePath();
+        if (!path || g.recorded.empty()) return;
+        if (WriteWhole(path, SerialiseShaderCache()))
+            LOGI("renderer: wrote %zu shaders and %zu pipelines to %s",
+                 g.shaders.size(), g.recorded.size(), path);
+    }
+
+    namespace
+    {
+        std::atomic<bool> g_saveAsked{ false };
+        std::atomic<bool> g_saving{ false };
+    }
+
+    // Both caches written while the run goes on, not only at its end: a run
+    // that is killed -- an iPad app put away, the usual end of one -- kept
+    // nothing, and compiled every pipeline again at its first draw the next
+    // time. Every 15 seconds that built something new, or when asked (the app
+    // going to the background). The file is made on a thread of its own; the
+    // renderer's part is copying what goes in it.
+    void PersistCaches()
+    {
+        static size_t saved = 0;
+        static auto lastSave = std::chrono::steady_clock::now();
+        const char* path = ShaderCachePath();
+        if (!path) return;
+        const auto now = std::chrono::steady_clock::now();
+        const bool asked = g_saveAsked.load(std::memory_order_relaxed);
+        if (g.recorded.size() == saved && !asked) return;
+        if (!asked && now - lastSave < std::chrono::seconds(15)) return;
+        if (g_saving.exchange(true)) return;
+        g_saveAsked = false;
+        saved = g.recorded.size();
+        lastSave = now;
+        std::thread([data = SerialiseShaderCache(), path] {
+            WriteWhole(path, data);
+            vk::pipeline::Persist();
+            g_saving = false;
+        }).detach();
     }
 
     // Work the draw path would otherwise do mid-frame, which is where a hitch
@@ -391,5 +604,7 @@ namespace vk::renderer::detail
              (unsigned long long)g.prewarmMicroseconds);
     }
 }
+
+void vk::renderer::SaveCachesSoon() { detail::g_saveAsked = true; }
 
 #endif  // MW2_HAVE_VULKAN
