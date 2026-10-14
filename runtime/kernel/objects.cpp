@@ -9,6 +9,7 @@
 #include <cstring>
 #include <map>
 #include <thread>
+#include "../platform.h"
 #include <unordered_map>
 
 namespace kernel
@@ -167,7 +168,7 @@ namespace
             if (!started)
             {
                 started = true;
-                std::thread([this] { Run(); }).detach();
+                platform::GuestThread([this] { Run(); }).detach();
             }
             due.emplace(when, Entry{ timer, generation, periodMs });
             wake.notify_one();

@@ -3,10 +3,18 @@
 
 // The window and Vulkan device. It runs on its own thread -- the guest owns the
 // main thread and never gives it back -- and degrades to headless if there is
-// no device.
+// no device. On Apple's systems it is the other way round: Cocoa and UIKit
+// take windows and events only on the process's main thread, so the guest
+// runs on a thread of its own and the main thread waits in RunMainThread for
+// Start to hand it the window (main.cpp).
 namespace vk
 {
     bool Start();
+#ifdef __APPLE__
+    // The main thread's life: SDL's events, and the presenter once Start asks
+    // for it. Never returns; the process ends through crash::RequestExit.
+    [[noreturn]] void RunMainThread();
+#endif
     // Stops the window thread but keeps the device, so what the renderer built on
     // it can be torn down first.
     void StopPresenting();

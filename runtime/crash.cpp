@@ -52,8 +52,15 @@ namespace
         // A write watchpoint takes the page's faults and steps over them; it is not
         // the process dying, so it must be asked first.
         if (sig == SIGSEGV && watchpoint::HandleWrite(info, uctx)) return;
-        // A write to a page the GPU's shadow of guest memory watches.
+        // A write to a page the GPU's shadow of guest memory watches. Linux
+        // reports it as an access error; Apple's systems turn a protection
+        // failure into SIGBUS.
+#ifdef __APPLE__
+        if ((sig == SIGBUS || (sig == SIGSEGV && info->si_code == SEGV_ACCERR)) &&
+            gpu::watch::HandleFault(info->si_addr)) return;
+#else
         if (sig == SIGSEGV && info->si_code == SEGV_ACCERR && gpu::watch::HandleFault(info->si_addr)) return;
+#endif
         if (sig == SIGTRAP && watchpoint::HandleStep(uctx)) return;
 
         uint8_t* base = guest::Base();

@@ -100,10 +100,17 @@ foreach(backend ${MW2_ONLINE_BACKENDS})
 endforeach()
 message(STATUS "Online service: ${MW2_ONLINE}")
 
-add_executable(mw2 ${RUNTIME_SOURCES}
+set(MW2_SOURCES ${RUNTIME_SOURCES}
     "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
     ${MW2_ONLINE_SOURCES}
     "${MW2_PPC_DIR}/stubs_generated.cpp")
+if(IOS)
+    # On iOS the app bundle, signing and install are Xcode's (ios/): the game
+    # is a static archive the app target links (ios/MW2IOS.cmake).
+    add_library(mw2 STATIC ${MW2_SOURCES})
+else()
+    add_executable(mw2 ${MW2_SOURCES})
+endif()
 target_link_libraries(mw2 PRIVATE ppc_recomp)
 target_compile_definitions(mw2 PRIVATE ${MW2_ONLINE_DEFINITIONS})
 if(MW2_DIAGNOSTICS)
@@ -156,6 +163,8 @@ if(WIN32)
     if(NOT MW2_DIAGNOSTICS)
         target_link_options(mw2 PRIVATE -mwindows)
     endif()
+elseif(IOS)
+    # A static archive; the app target links it (ios/project.yml).
 else()
     # -rdynamic so backtrace_symbols can resolve the sub_XXXXXXXX guest functions.
     set_target_properties(mw2 PROPERTIES ENABLE_EXPORTS ON)
@@ -189,10 +198,14 @@ target_link_libraries(mw2 PRIVATE ffmpeg_xma)
 if(WIN32)
     include(cmake/vulkan-windows.cmake)
     add_dependencies(mw2 vulkan_import_library)
+elseif(APPLE)
+    include(cmake/moltenvk.cmake)
 else()
     find_package(Vulkan)
 endif()
-if(Vulkan_FOUND)
+if(APPLE)
+    # MoltenVK is linked in (cmake/moltenvk.cmake), and its headers are Vulkan's.
+elseif(Vulkan_FOUND)
     target_link_libraries(mw2 PRIVATE Vulkan::Vulkan)
     target_compile_definitions(mw2 PRIVATE MW2_HAVE_VULKAN=1)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARY}")
@@ -205,7 +218,7 @@ if(NOT WIN32)
 endif()
 
 # The two tools below are for working on the renderer, on Linux.
-if(NOT WIN32)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 # ---- offline shader translation -------------------------------------------
 # The translator has to live in the runtime, because the title hands the GPU
 # microcode while it runs. Building it as a tool too gives a fast loop against
@@ -288,7 +301,11 @@ if(MW2_USE_SDL)
     target_sources(mw2 PRIVATE "${MW2_FONTS_SOURCE}")
     target_include_directories(mw2 PRIVATE "${imgui_SOURCE_DIR}")
     target_compile_definitions(mw2 PRIVATE MW2_SIGNIN_PICTURE=1)
+endif()
 
+# Apple's systems have no launcher yet: the game is installed with build.sh's
+# output (ios/README.md).
+if(MW2_USE_SDL AND NOT APPLE)
     set(XENON "${CMAKE_SOURCE_DIR}/XenonRecomp")
     file(GLOB LAUNCHER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/launcher/*.cpp")
     add_executable(launcher ${LAUNCHER_SOURCES}
@@ -341,4 +358,8 @@ if(MW2_USE_SDL)
             target_link_options(launcher PRIVATE -static-libstdc++ -static-libgcc)
         endif()
     endif()
+endif()
+
+if(IOS)
+    include(ios/MW2IOS.cmake)
 endif()

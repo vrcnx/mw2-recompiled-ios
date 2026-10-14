@@ -183,7 +183,19 @@ set(FFMPEG_SOURCES
     ${FFMPEG_SRC}/libavutil/xtea.c
 )
 
+# The x86 initialisers are the only architecture-specific sources Xenia's
+# lists take. Anywhere else (Apple's arm64 machines) FFmpeg is built as plain C
+# -- config.h's MW2_FFMPEG_GENERIC -- rather than with its arm64 assembly,
+# which no list here carries: the XMA decode is a small part of a frame.
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|i.86)$" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+    list(FILTER FFMPEG_SOURCES EXCLUDE REGEX "/x86/")
+    set(MW2_FFMPEG_GENERIC ON)
+endif()
+
 add_library(ffmpeg_xma STATIC ${FFMPEG_SOURCES})
+if(MW2_FFMPEG_GENERIC)
+    target_compile_definitions(ffmpeg_xma PRIVATE MW2_FFMPEG_GENERIC=1)
+endif()
 target_include_directories(ffmpeg_xma
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}" "${FFMPEG_SRC}"
     PRIVATE "${FFMPEG_SRC}/libavcodec")

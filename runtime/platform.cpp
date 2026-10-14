@@ -1,6 +1,12 @@
 #include "platform.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <memory>
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -102,6 +108,26 @@ void* platform::Symbol(void* library, const char* name)
     return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(library), name));
 }
 
+#elif defined(__APPLE__)
+
+void platform::Initialise() {}
+
+uint32_t platform::ThreadId()
+{
+    uint64_t id = 0;
+    pthread_threadid_np(nullptr, &id);
+    return uint32_t(id);
+}
+
+bool platform::IsMainThread() { return pthread_main_np() != 0; }
+
+// Apple's takes the calling thread's name only, up to 63 characters.
+void platform::SetThreadName(const char* name) { pthread_setname_np(name); }
+
+// Apple schedules by quality of service, not by nice value or policy.
+void platform::LowerThreadPriority() { pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0); }
+void platform::IdleThreadPriority() { pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0); }
+
 #else
 
 void platform::Initialise() {}
@@ -123,6 +149,10 @@ void platform::IdleThreadPriority()
     if (pthread_setschedparam(pthread_self(), SCHED_IDLE, &none) != 0) LowerThreadPriority();
 }
 
+#endif
+
+#ifndef _WIN32
+
 void platform::PrintBacktrace(const char* why)
 {
     void* frames[64];
@@ -137,5 +167,80 @@ void platform::PrintBacktrace(const char* why)
 void* platform::OpenLibrary(const char* path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
 void* platform::LoadedLibrary(const char* name) { return dlopen(name, RTLD_NOW | RTLD_NOLOAD); }
 void* platform::Symbol(void* library, const char* name) { return dlsym(library, name); }
+
+#endif
+
+#ifdef __APPLE__
+
+namespace
+{
+    // The 16 MB the Windows build asks of its linker (CMakeLists.txt).
+    constexpr size_t kGuestStackBytes = 16u << 20;
+
+    void* RunGuestThread(void* body)
+    {
+        std::unique_ptr<std::function<void()>> owned(static_cast<std::function<void()>*>(body));
+#if TARGET_OS_IOS
+        // Left to itself iOS parks a new thread on the efficiency cores and
+        // throttles it first; every guest thread is on the frame's path.
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+        (*owned)();
+        return nullptr;
+    }
+}
+
+platform::GuestThread::GuestThread(std::function<void()> body)
+{
+    pthread_attr_t attributes;
+    pthread_attr_init(&attributes);
+    pthread_attr_setstacksize(&attributes, kGuestStackBytes);
+    auto* owned = new std::function<void()>(std::move(body));
+    pthread_t thread;
+    if (pthread_create(&thread, &attributes, RunGuestThread, owned) != 0)
+    {
+        delete owned;
+        std::fprintf(stderr, "[E] could not start a guest thread\n");
+        std::abort();
+    }
+    pthread_attr_destroy(&attributes);
+    handle_ = reinterpret_cast<void*>(thread);
+}
+
+platform::GuestThread::GuestThread(GuestThread&& other) noexcept : handle_(other.handle_) { other.handle_ = nullptr; }
+
+platform::GuestThread& platform::GuestThread::operator=(GuestThread&& other) noexcept
+{
+    if (joinable()) std::terminate();   // as std::thread does
+    handle_ = other.handle_;
+    other.handle_ = nullptr;
+    return *this;
+}
+
+platform::GuestThread::~GuestThread() { if (joinable()) std::terminate(); }
+
+bool platform::GuestThread::joinable() const { return handle_ != nullptr; }
+
+void platform::GuestThread::join()
+{
+    pthread_join(reinterpret_cast<pthread_t>(handle_), nullptr);
+    handle_ = nullptr;
+}
+
+void platform::GuestThread::detach()
+{
+    pthread_detach(reinterpret_cast<pthread_t>(handle_));
+    handle_ = nullptr;
+}
+
+#else
+
+platform::GuestThread::GuestThread(std::function<void()> body) : thread_(std::move(body)) {}
+platform::GuestThread::GuestThread(GuestThread&& other) noexcept = default;
+platform::GuestThread& platform::GuestThread::operator=(GuestThread&& other) noexcept = default;
+platform::GuestThread::~GuestThread() = default;
+bool platform::GuestThread::joinable() const { return thread_.joinable(); }
+void platform::GuestThread::join() { thread_.join(); }
+void platform::GuestThread::detach() { thread_.detach(); }
 
 #endif

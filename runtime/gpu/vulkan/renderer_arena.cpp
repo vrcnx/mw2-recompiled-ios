@@ -341,14 +341,21 @@ namespace vk::renderer::detail
         highest = high;
     }
 
-    __attribute__((target_clones("avx2", "default")))
+    // An AVX2 copy beside the baseline one on x86; arm64's NEON is always there.
+#if defined(__x86_64__)
+#define MW2_INDEX_CLONES __attribute__((target_clones("avx2", "default")))
+#else
+#define MW2_INDEX_CLONES
+#endif
+
+    MW2_INDEX_CLONES
     void SwapIndices16(const uint8_t* source, uint16_t* out, uint32_t count, uint16_t& lowest,
                        uint16_t& highest)
     {
         SwapIndices(source, out, count, lowest, highest);
     }
 
-    __attribute__((target_clones("avx2", "default")))
+    MW2_INDEX_CLONES
     void SwapIndices32(const uint8_t* source, uint32_t* out, uint32_t count, uint32_t& lowest,
                        uint32_t& highest)
     {

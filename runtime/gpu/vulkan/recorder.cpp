@@ -19,7 +19,22 @@
 #include <atomic>
 #include <thread>
 
+#if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#endif
+
+namespace
+{
+    // A spin-wait's breath: PAUSE on x86, YIELD on arm64.
+    inline void CpuRelax()
+    {
+#if defined(__x86_64__) || defined(_M_X64)
+        _mm_pause();
+#elif defined(__aarch64__)
+        __asm__ __volatile__("yield");
+#endif
+    }
+}
 
 namespace vk::record::detail
 {
@@ -71,7 +86,7 @@ namespace
                 bool more = false;
                 for (uint32_t i = 0; i < kSpins && !more; i++)
                 {
-                    _mm_pause();
+                    CpuRelax();
                     more = q.written.load(std::memory_order_relaxed) != at;
                 }
                 if (more) continue;
@@ -104,7 +119,7 @@ namespace
         if (q.made.load(std::memory_order_acquire) >= position) return;
         for (uint32_t i = 0; i < kSpins; i++)
         {
-            _mm_pause();
+            CpuRelax();
             if (q.made.load(std::memory_order_acquire) >= position) return;
         }
         q.waiters.fetch_add(1, std::memory_order_seq_cst);

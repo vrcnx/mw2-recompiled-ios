@@ -23,6 +23,7 @@
 #include <chrono>
 #include <mutex>
 #include <thread>
+#include "../platform.h"
 
 namespace
 {
@@ -62,7 +63,7 @@ namespace
         // the two threads that can raise one here take turns.
         std::mutex guestCall;
 
-        std::thread worker, vblank;
+        platform::GuestThread worker, vblank;   // both raise guest interrupts
         std::atomic<bool> running{ false };
         std::atomic<uint64_t> frames{ 0 };       // VdSwap calls
         diag::Stat vblanks;
@@ -243,8 +244,8 @@ void gpu::Initialise()
     if (Rendering() && !vk::renderer::Initialise()) LOGW("gpu: no device came up to render on");
     g.gpuPcr = kernel::CreateThreadBlock(0xF000);
     g.vblankPcr = kernel::CreateThreadBlock(0xF001);
-    g.worker = std::thread(Worker);
-    g.vblank = std::thread(VBlankWorker);
+    g.worker = platform::GuestThread(Worker);
+    g.vblank = platform::GuestThread(VBlankWorker);
 }
 
 void gpu::Shutdown()

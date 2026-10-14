@@ -52,7 +52,30 @@ export MW2_VERSION=$VERSION
 DIAGNOSTICS=ON
 PORTABLE=OFF
 if [ -n "$RELEASE" ] && [ "$RELEASE" != 0 ]; then BUILD=$BUILD-release; DIAGNOSTICS=OFF; PORTABLE=ON; fi
-TOOLCHAIN="-DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18"
+# The host's compilers. On macOS, Homebrew's LLVM (brew install llvm): Apple's
+# clang lacks nothing the runtime needs, but one compiler for the tools, the
+# game and the iOS build (ios/build.sh) keeps their C++ library the same. A
+# deployment target is always given: without one, Homebrew's libc++ headers
+# reach for symbols only its own library has.
+if [ "$(uname)" = Darwin ]; then
+    LLVM=${LLVM:-/opt/homebrew/opt/llvm/bin}
+    [ -x "$LLVM/clang++" ] || { echo "no clang++ in $LLVM: brew install llvm, or set LLVM=<its bin folder>"; exit 1; }
+    HOST_CC=$LLVM/clang
+    HOST_CXX=$LLVM/clang++
+    NPROC=$(sysctl -n hw.ncpu)
+    HOST_CMAKE="-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+    # XenonRecomp's fmt leans on <cstdlib> arriving through other headers,
+    # which newer libc++ no longer does.
+    HOST_TOOL_FLAGS="-include cstdlib -include cstring"
+    export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}
+else
+    HOST_CC=clang-18
+    HOST_CXX=clang++-18
+    NPROC=$(nproc)
+    HOST_CMAKE=""
+    HOST_TOOL_FLAGS=""
+fi
+TOOLCHAIN="-DCMAKE_C_COMPILER=$HOST_CC -DCMAKE_CXX_COMPILER=$HOST_CXX $HOST_CMAKE"
 EXE=mw2
 if [ -n "$WINDOWS" ] && [ "$WINDOWS" != 0 ]; then
     [ -d "$LLVM_MINGW" ] || { echo "WINDOWS=1 needs LLVM_MINGW=<llvm-mingw folder>"; exit 1; }
@@ -78,8 +101,9 @@ fi
 
 echo "==> 2. build XenonRecomp / XenonAnalyse"
 cmake -B XenonRecomp/build -S XenonRecomp -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 >/dev/null
-cmake --build XenonRecomp/build -j"$(nproc)" >/dev/null
+      -DCMAKE_C_COMPILER=$HOST_CC -DCMAKE_CXX_COMPILER=$HOST_CXX $HOST_CMAKE \
+      "-DCMAKE_CXX_FLAGS=$HOST_TOOL_FLAGS" >/dev/null
+cmake --build XenonRecomp/build -j"$NPROC" >/dev/null
 
 echo "==> 3. extract the executables from the ISO (XDVDFS)"
 mkdir -p $DISC
@@ -126,7 +150,7 @@ if [ "$VERSION" = tu6 ]; then
     # XenonRecomp's own patcher, from the command line: XenonAnalyse reads the
     # patched executable before XenonRecomp would make it.
     if [ ! -x XenonRecomp/build/xexpatch ]; then
-        clang++-18 -std=c++20 -O1 -IXenonRecomp/XenonUtils -IXenonRecomp/thirdparty/simde tools/xexpatch.cpp \
+        $HOST_CXX $HOST_TOOL_FLAGS -std=c++20 -O1 -IXenonRecomp/XenonUtils -IXenonRecomp/thirdparty/simde tools/xexpatch.cpp \
             XenonRecomp/build/XenonUtils/libXenonUtils.a XenonRecomp/build/thirdparty/disasm/libdisasm.a \
             -o XenonRecomp/build/xexpatch
     fi
@@ -179,7 +203,7 @@ if [ "$BUILD" != build ]; then
 fi
 cmake -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release -DMW2_TITLE=$TITLE -DMW2_VERSION=$VERSION -DMW2_DIAGNOSTICS=$DIAGNOSTICS -DMW2_ONLINE=${ONLINE:-none} -DMW2_PORTABLE=$PORTABLE -DMW2_RELEASE_TAG=${RELEASE_TAG:-} $FETCHED $CMAKE_EXTRA \
       $TOOLCHAIN >/dev/null
-cmake --build $BUILD -j"$(nproc)"
+cmake --build $BUILD -j"$NPROC"
 ls -la $BUILD/$EXE
 
 echo

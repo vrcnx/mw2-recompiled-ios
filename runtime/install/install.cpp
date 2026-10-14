@@ -13,6 +13,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#include <mach-o/dyld.h>
+#endif
 #ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
 #endif
@@ -51,6 +55,19 @@ namespace
         wchar_t path[MAX_PATH * 4];
         const DWORD length = GetModuleFileNameW(nullptr, path, DWORD(std::size(path)));
         return fs::path(std::wstring(path, length)).parent_path();
+#elif TARGET_OS_IOS
+        // The app bundle is sealed and read-only, so what a player's copy
+        // keeps beside the executable -- game/, saves/, .env -- lives in the
+        // app's Documents, which the Files app shows (UIFileSharingEnabled)
+        // for copying the installed game in.
+        const char* home = std::getenv("HOME");   // the app's data container
+        return fs::path(home ? home : "") / "Documents";
+#elif defined(__APPLE__)
+        char path[4096];
+        uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) != 0) return {};
+        std::error_code ec;
+        return fs::weakly_canonical(path, ec).parent_path();
 #else
         std::error_code ec;
         return fs::read_symlink("/proc/self/exe", ec).parent_path();
@@ -158,9 +175,16 @@ bool install::Prepare(int, char**, Launch& launch, int& exitCode)
     }
     // Not installed, or installed for another version of this build: both are
     // the launcher's to put right.
+#if TARGET_OS_IOS
+    // No launcher on iOS: the game is installed on a computer and its game/
+    // folder copied into the app's Documents (ios/README.md).
+    ShowError(std::string("The game is not installed. Copy the game folder your computer's launcher"
+                          " installed into this app's Documents (") + kXex + " included).");
+#else
     if (StartLauncher()) { exitCode = 0; return false; }
     ShowError(std::string("The game is not installed here, and ") + kLauncher +
               " is not beside this program to install it.");
+#endif
     return false;
 }
 

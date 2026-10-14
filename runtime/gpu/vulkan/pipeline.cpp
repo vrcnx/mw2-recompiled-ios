@@ -171,6 +171,10 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     std::vector<const char*> extensions(extraExtensions, extraExtensions + extraCount);
     if (DeviceHasExtension(physical, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME))
         extensions.push_back(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME);
+    // A device that implements Vulkan only in part -- MoltenVK on Metal -- says
+    // so with this extension, and the application has to enable it.
+    if (DeviceHasExtension(physical, "VK_KHR_portability_subset"))
+        extensions.push_back("VK_KHR_portability_subset");
 
     // Direct3D 9 filters each cube face on its own, clamped at its edges; a
     // Vulkan cube blends across them unless told not to. Xenia asks for the

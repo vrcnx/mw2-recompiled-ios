@@ -23,6 +23,15 @@
 
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#include "gpu/vulkan/presenter.h"
+#if TARGET_OS_IOS
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL_main.h>
+#endif
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -147,7 +156,8 @@ namespace
     }
 }
 
-int main(int argc, char** argv)
+// main() on Linux and Windows. On Apple's systems, the guest thread's.
+static int GuestMain(int argc, char** argv)
 {
     platform::Initialise();
 
@@ -251,3 +261,31 @@ int main(int argc, char** argv)
     ReportAll();
     return 0;
 }
+
+#ifdef __APPLE__
+// The window has to be the main thread's (gpu/vulkan/presenter.h), so the guest
+// gets a thread of its own, with the stack it needs, and runs as main() runs
+// elsewhere; the main thread turns into the window's.
+static int AppleMain(int argc, char** argv)
+{
+    platform::GuestThread([argc, argv] {
+        const int code = GuestMain(argc, argv);
+        std::fflush(nullptr);
+        _exit(code);
+    }).detach();
+    vk::RunMainThread();
+}
+
+#if TARGET_OS_IOS
+// The app's main (ios/main.m) lands here: UIKit's launch first, then
+// AppleMain on the main thread once the app has finished launching.
+extern "C" int mw2_ios_main(int argc, char** argv)
+{
+    return SDL_RunApp(argc, argv, AppleMain, nullptr);
+}
+#else
+int main(int argc, char** argv) { return AppleMain(argc, argv); }
+#endif
+#else
+int main(int argc, char** argv) { return GuestMain(argc, argv); }
+#endif

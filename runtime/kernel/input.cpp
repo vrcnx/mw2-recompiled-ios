@@ -316,7 +316,11 @@ PPC_FUNC(__imp__XamInputGetState)
     if (pad || elsewhere || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
     {
 
+#ifndef __APPLE__
+        // On Apple's systems the main thread's event pump keeps the pads'
+        // state (gpu/vulkan/presenter.cpp, vk::RunMainThread).
         if (pad) SDL_UpdateGamepads();
+#endif
         uint16_t b = elsewhere;
         auto down = [&](SDL_GamepadButton x){ return pad && SDL_GetGamepadButton(pad, x); };
         if (down(SDL_GAMEPAD_BUTTON_DPAD_UP))        b |= BTN_DPAD_UP;

@@ -12,7 +12,7 @@
 // Diagnostics only.
 namespace watchpoint
 {
-#if MW2_DIAGNOSTICS && !defined(_WIN32)
+#if MW2_DIAGNOSTICS && defined(__linux__) && defined(__x86_64__)
     void Install();
 
     // Around a write this runtime makes itself. Without it the first memmove

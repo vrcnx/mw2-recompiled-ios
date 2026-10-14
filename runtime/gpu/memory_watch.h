@@ -16,7 +16,14 @@
 // would have drawn from.
 namespace gpu::watch
 {
+    // The host's page: mprotect works in whole ones, and a watched unit
+    // smaller than the page would protect its neighbours with it, whose
+    // writes then fault as nobody's. Apple's arm64 systems use 16 KB pages.
+#if defined(__APPLE__) && defined(__aarch64__)
+    constexpr uint32_t kPageBytes = 16384;
+#else
     constexpr uint32_t kPageBytes = 4096;
+#endif
 
     // The copy, as mapped for the CPU: physical address N at `shadow + N`.
     // Null leaves every draw on the per-draw copy (MW2_NO_SHADOW=1 does that).

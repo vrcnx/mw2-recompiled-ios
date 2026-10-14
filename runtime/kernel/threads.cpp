@@ -6,6 +6,7 @@
 #include "../guest.h"
 #include "../log.h"
 #include "../crash.h"
+#include "../platform.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -44,7 +45,7 @@ namespace
         // The host thread holds the object for as long as it runs.
         static void Launch(const std::shared_ptr<GuestThread>& thread)
         {
-            std::thread([thread] { thread->Body(); }).detach();
+            platform::GuestThread([thread] { thread->Body(); }).detach();
         }
 
         void Exit()

@@ -37,7 +37,7 @@
 #define ARCH_X86 0
 #define ARCH_X86_64 0
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if (defined(__aarch64__) || defined(_M_ARM64)) && !defined(MW2_FFMPEG_GENERIC)
   /* ARM64 */
   #if defined(_WIN32)
     #define SLIBSUF ".dll"
@@ -142,6 +142,19 @@
     #define HAVE_XMM_CLOBBERS 1
     #define HAVE_INLINE_ASM_DIRECT_SYMBOL_REFS 1
   #endif
+#elif defined(MW2_FFMPEG_GENERIC)
+  /* Plain C, every ARCH_ above left 0 (CMakeLists.txt). */
+  #if defined(_WIN32)
+    #define SLIBSUF ".dll"
+  #elif defined(__APPLE__)
+    #define SLIBSUF ".dylib"
+  #else
+    #define SLIBSUF ".so"
+  #endif
+  #define HAVE_FAST_64BIT 1
+  #define HAVE_SIMD_ALIGN_16 0
+  #define HAVE_SIMD_ALIGN_32 0
+  #define HAVE_SIMD_ALIGN_64 0
 #else
   #error "Unsupported architecture for FFmpeg build"
 #endif
@@ -350,6 +363,17 @@
     #define HAVE_GLOB 1
     #define CONFIG_ICONV 1
   #endif
+#ifdef __APPLE__
+  /* What Linux has and Apple's systems do not. */
+  #undef  HAVE_MEMALIGN
+  #define HAVE_MEMALIGN 0
+  #undef  HAVE_SCHED_GETAFFINITY
+  #define HAVE_SCHED_GETAFFINITY 0
+  #undef  HAVE_ASM_TYPES_H
+  #define HAVE_ASM_TYPES_H 0
+  #undef  HAVE_LINUX_PERF_EVENT_H
+  #define HAVE_LINUX_PERF_EVENT_H 0
+#endif
 #endif
 
 /* ------------------------------------------------------------------ */

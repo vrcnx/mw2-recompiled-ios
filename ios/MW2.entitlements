@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The guest's memory is one 4 GiB reservation with the physical bank
+	     mapped twice inside it (runtime/guest_memory.cpp); the default iOS
+	     address space is too small for it. Needs a paid developer team. -->
+	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+	<true/>
+	<!-- Guest memory, the renderer's caches and MoltenVK together exceed the
+	     default per-app memory limit. -->
+	<key>com.apple.developer.kernel.increased-memory-limit</key>
+	<true/>
+</dict>
+</plist>

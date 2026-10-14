@@ -16,6 +16,11 @@
 #  ifndef MEM_PRESERVE_PLACEHOLDER
 #    define MEM_PRESERVE_PLACEHOLDER 0x00000002
 #  endif
+#elif defined(__APPLE__)
+#  include <sys/mman.h>
+#  include <unistd.h>
+#  include <mach/mach.h>
+#  include <mach/vm_map.h>
 #else
 #  include <sys/mman.h>
 #  include <unistd.h>
@@ -41,7 +46,7 @@ bool guest::Commit(uint32_t address, uint32_t size)
 #endif
 }
 
-// On Linux the whole space is mapped read/write and a page is backed the first
+// On Linux and Apple's systems the whole space is mapped read/write and a page is backed the first
 // time it is touched, wherever it is. Windows only backs what is committed, so
 // the fault handler commits a reserved page the guest touches: the same
 // memory, zeroed, on first use.
@@ -126,6 +131,50 @@ namespace
                                PAGE_NOACCESS, nullptr, 0) &&
                g_virtualAlloc2(nullptr, g_base + apertureEnd, size_t(kSpace - apertureEnd),
                                MEM_RESERVE | MEM_REPLACE_PLACEHOLDER, PAGE_NOACCESS, nullptr, 0);
+    }
+#elif defined(__APPLE__)
+    // macOS and iOS: anonymous memory is backed on first touch as on Linux.
+    // There is no memfd, and the iOS sandbox refuses POSIX shared memory, so
+    // the bank is a Mach named memory entry -- zero-filled and backed lazily,
+    // like an unlinked shm object -- mapped over both windows with vm_map. On
+    // iOS the 4 GiB reservation needs the extended virtual addressing
+    // entitlement (ios/MW2.entitlements).
+    bool ReserveSpace()
+    {
+        g_base = (uint8_t*)mmap(nullptr, kSpace, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        if (g_base == MAP_FAILED) g_base = nullptr;
+        return g_base != nullptr;
+    }
+
+    bool MapPhysicalAperture()
+    {
+        memory_object_size_t size = memory_object_size_t(guest::kPhysicalEnd - guest::kPhysicalBase);
+        mach_port_t bank = MACH_PORT_NULL;
+        kern_return_t kr = mach_make_memory_entry_64(mach_task_self(), &size, 0,
+                                                     MAP_MEM_NAMED_CREATE | VM_PROT_READ | VM_PROT_WRITE,
+                                                     &bank, MACH_PORT_NULL);
+        if (kr != KERN_SUCCESS) { LOGE("mach_make_memory_entry_64 failed (%d)", kr); return false; }
+        bool ok = true;
+        for (uint32_t window : { guest::kPhysicalBase, guest::kApertureBase })
+        {
+            // Over the reservation, as MAP_FIXED would be. The most a page may
+            // be made stays read/write, which the GPU's memory watch needs to
+            // take a page back from read-only (gpu/memory_watch.cpp).
+            vm_address_t at = vm_address_t(g_base + window);
+            kr = vm_map(mach_task_self(), &at, vm_size_t(size), 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+                        bank, 0, FALSE, VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE,
+                        VM_INHERIT_NONE);
+            if (kr != KERN_SUCCESS || at != vm_address_t(g_base + window))
+            {
+                LOGE("vm_map of the physical bank at %08X failed (%d)", window, kr);
+                ok = false;
+                break;
+            }
+        }
+        // The mappings keep the memory alive; the port is not needed.
+        mach_port_deallocate(mach_task_self(), bank);
+        return ok;
     }
 #else
     bool ReserveSpace()

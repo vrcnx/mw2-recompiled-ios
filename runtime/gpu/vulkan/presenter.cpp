@@ -20,6 +20,11 @@ void     vk::WaitUntilTaken(uint64_t) {}
 uint64_t vk::GuestBlankPeriod() { return 0; }
 bool     vk::Running()         { return false; }
 uint64_t vk::PresentedFrames() { return 0; }
+#ifdef __APPLE__
+#include <chrono>
+#include <thread>
+[[noreturn]] void vk::RunMainThread() { for (;;) std::this_thread::sleep_for(std::chrono::hours(1)); }
+#endif
 #else
 
 #include <atomic>
@@ -875,7 +880,13 @@ namespace
             g_messenger = VK_NULL_HANDLE;
         }
         if (g.instance) vkDestroyInstance(g.instance, nullptr);
+#ifdef __APPLE__
+        // Off the main thread a window is not ours to touch; the process is
+        // ending, and the system takes it down with it.
+        if (g.window && SDL_IsMainThread()) SDL_DestroyWindow(g.window);
+#else
         if (g.window) SDL_DestroyWindow(g.window);
+#endif
         g.surface = VK_NULL_HANDLE;
         g.instance = VK_NULL_HANDLE;
         g.window = nullptr;
@@ -1020,6 +1031,45 @@ namespace
     }
 }
 
+#ifdef __APPLE__
+namespace
+{
+    // Start's request for the main thread, and the main thread's word that
+    // the presenter it ran has stopped: there is no worker to join.
+    std::atomic<bool> g_mainAsked{ false };
+    std::atomic<bool> g_presenterStarted{ false };
+    std::mutex g_presenterDoneLock;
+    std::condition_variable g_presenterDoneWake;
+    bool g_presenterDone = false;
+}
+
+[[noreturn]] void vk::RunMainThread()
+{
+    crash::RegisterThread("main thread (window)");
+    // Video and the pads up front, on this thread, where Cocoa and UIKit want
+    // them; the pads' state then arrives through this thread's event pump
+    // (kernel/input.cpp leaves SDL_UpdateGamepads to it).
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
+        LOGW("vulkan: SDL would not start on the main thread (%s)", SDL_GetError());
+    for (;;)
+    {
+        if (g_mainAsked.exchange(false, std::memory_order_acq_rel))
+        {
+            Worker();
+            std::lock_guard held(g_presenterDoneLock);
+            g_presenterDone = true;
+            g_presenterDoneWake.notify_all();
+        }
+        // Until the window is asked for, and once it has gone: the system's
+        // events, so the app answers it, and quitting still quits.
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+            if (event.type == SDL_EVENT_QUIT) crash::RequestExit("the app was quit");
+        SDL_Delay(5);
+    }
+}
+#endif
+
 bool vk::Start()
 {
     // Every build opens it; MW2_WINDOW=0 keeps it shut, for a headless
@@ -1028,7 +1078,12 @@ bool vk::Start()
     if (!window) return false;
 
     g.running = true;
+#ifdef __APPLE__
+    g_presenterStarted = true;
+    g_mainAsked.store(true, std::memory_order_release);
+#else
     g.worker = std::thread(Worker);
+#endif
     while (!g.ready.load(std::memory_order_acquire)) std::this_thread::yield();
     return g.running.load();
 }
@@ -1074,11 +1129,22 @@ uint64_t vk::GuestBlankPeriod()
 // stopping and destroying are two steps rather than one.
 void vk::StopPresenting()
 {
+#ifdef __APPLE__
+    if (!g_presenterStarted.exchange(false)) return;
+#else
     if (!g.worker.joinable()) return;
+#endif
     g.running = false;
     { std::lock_guard lock(g.lock); g.wake.notify_all(); g.takenWake.notify_all(); }
     { std::lock_guard lock(g.waitLock); g.waitWake.notify_all(); }
+#ifdef __APPLE__
+    {
+        std::unique_lock held(g_presenterDoneLock);
+        g_presenterDoneWake.wait(held, [] { return g_presenterDone; });
+    }
+#else
     g.worker.join();
+#endif
     if (g.waiter.joinable())
     {
         g.waiter.join();

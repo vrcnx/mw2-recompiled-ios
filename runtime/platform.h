@@ -1,10 +1,41 @@
 #pragma once
-// The few things the runtime asks of the host system that Linux and Windows
-// spell differently. Everything else goes through the C++ library or SDL.
+// The few things the runtime asks of the host system that Linux, Windows and
+// Apple's systems spell differently. Everything else goes through the C++
+// library or SDL.
 #include <cstdint>
+#include <functional>
+#include <thread>
 
 namespace platform
 {
+    // A thread that runs guest code. The recompiled code nests deep on the
+    // host stack: Linux gives a thread 8 MB and the Windows build asks for
+    // 16 MB, but macOS and iOS give a secondary thread 512 KB, which the title
+    // overflows in its first frames. On Apple this is a pthread with 16 MB of
+    // stack; elsewhere it is a std::thread. Joined or detached like one.
+    class GuestThread
+    {
+    public:
+        GuestThread() = default;
+        explicit GuestThread(std::function<void()> body);
+        GuestThread(GuestThread&& other) noexcept;
+        GuestThread& operator=(GuestThread&& other) noexcept;
+        GuestThread(const GuestThread&) = delete;
+        GuestThread& operator=(const GuestThread&) = delete;
+        ~GuestThread();
+
+        bool joinable() const;
+        void join();
+        void detach();
+
+    private:
+#ifdef __APPLE__
+        void* handle_ = nullptr;   // pthread_t
+#else
+        std::thread thread_;
+#endif
+    };
+
     // First thing in main, before any other thread starts: Windows sleeps in
     // 15.6 ms steps unless asked for 1 ms, and the title paces itself with
     // short sleeps; and a release build there finds the terminal it was

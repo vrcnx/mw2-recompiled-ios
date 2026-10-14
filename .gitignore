@@ -54,3 +54,12 @@ config/*_switch_tables.tu0.toml
 
 # ---- a development run's switches (docs/switches.md, "The settings file") ----
 .env
+
+# ---- the iOS app (ios/build.sh) ----
+ios/local.env
+ios/LocalAssets.xcassets/
+ios/MW2.xcodeproj/
+ios/Info.plist
+build-ios*/
+build-iossim*/
+ios-game/

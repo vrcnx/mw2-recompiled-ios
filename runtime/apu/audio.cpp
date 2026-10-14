@@ -28,6 +28,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#include "../platform.h"
 
 namespace
 {
@@ -61,7 +62,7 @@ namespace
     std::mutex g_lock;
     std::condition_variable g_wake;
     Client g_clients[kMaxClients];
-    std::thread g_worker;
+    platform::GuestThread g_worker;   // runs the voices' guest callbacks
     bool g_workerStarted = false;
 
     diag::Stat g_callbacks, g_frames, g_dropped, g_earlyPumps;   // the audio thread's
@@ -208,7 +209,7 @@ namespace
     {
         if (g_workerStarted) return;
         g_workerStarted = true;
-        g_worker = std::thread(WorkerMain);
+        g_worker = platform::GuestThread(WorkerMain);
         g_worker.detach();
     }
 }
