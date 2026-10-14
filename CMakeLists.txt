@@ -72,6 +72,7 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/runtime/apu/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/install/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/menu/*.cpp"
+     "${CMAKE_SOURCE_DIR}/runtime/bots/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/*.cpp")
 
 # The glue build.sh generates from the recompiled output -- a stub for every

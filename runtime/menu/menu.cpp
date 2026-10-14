@@ -8,6 +8,7 @@
 #include "../crash.h"
 #include "../field_of_view.h"
 #include "profile.h"   // launcher/profile.h: the saved stats' editor
+#include "../bots/bots.h"
 
 #include <algorithm>
 #include <atomic>
@@ -48,6 +49,7 @@ namespace
         { "Display", "How the picture reaches the screen." },
         { "Graphics", "What the renderer draws." },
         { "Gameplay", "How the game looks in play." },
+        { "Bots", "Players of this runtime's own in the matches you host: System Link, Private Match." },
         { "Cheats", "Rank and unlocks, written to your saved stats the next time the game starts." },
         { "System", "The menu itself, and quitting to apply what waits for the next start." },
     };
@@ -200,34 +202,75 @@ namespace
             list.push_back(std::move(fov));
         }
 
+        // ---- Bots
+        {
+            std::vector<Choice> counts = { { "None", "" } };
+            for (int n = 1; n <= 17; n++) counts.push_back({ std::to_string(n), std::to_string(n) });
+            Setting count = Switch(3, "Number of Bots",
+                "How many bots join a match you host. They come in a moment after it starts, and leave "
+                "when the number goes down.",
+                "MW2_BOTS", counts, false);
+            const auto store = count.store;
+            count.store = [store](const std::string& value) {
+                store(value);
+                bots::SetCount(value.empty() ? 0u : uint32_t(std::atoi(value.c_str())));
+            };
+            list.push_back(std::move(count));
+        }
+        {
+            Setting skill = Switch(3, "Skill",
+                "How quickly they react and turn, and how well they aim. Recruit misses a lot; Veteran "
+                "rarely gives you a second chance.",
+                "MW2_BOT_SKILL", { { "Regular", "" }, { "Recruit", "0" }, { "Hardened", "2" }, { "Veteran", "3" } },
+                false);
+            const auto store = skill.store;
+            skill.store = [store](const std::string& value) {
+                store(value);
+                bots::SetSkill(value.empty() ? bots::Skill::Regular : bots::Skill(std::atoi(value.c_str())));
+            };
+            list.push_back(std::move(skill));
+        }
+        {
+            Setting teams = Switch(3, "Teams",
+                "Spread across both teams, with you, or all on the other team, against you. For bots "
+                "that join from now on.",
+                "MW2_BOT_TEAMS", { { "Both Teams", "" }, { "Against You", "against" } }, false);
+            const auto store = teams.store;
+            teams.store = [store](const std::string& value) {
+                store(value);
+                bots::SetTeams(value.empty() ? bots::Teams::Both : bots::Teams::Against);
+            };
+            list.push_back(std::move(teams));
+        }
+
         // ---- Cheats
-        list.push_back(Header(3, "Multiplayer"));
-        list.push_back(Switch(3, "Rank",
+        list.push_back(Header(4, "Multiplayer"));
+        list.push_back(Switch(4, "Rank",
             "Level 70, the top of the current prestige, at the next start.",
             "MW2_CHEAT_MAX_RANK", { { "As earned", "" }, { "Max (level 70)", "1" } }, true));
         {
             std::vector<Choice> prestiges = { { "As earned", "" } };
             for (int p = 0; p <= profile::MaxPrestige(); p++)
                 prestiges.push_back({ p ? "Prestige " + std::to_string(p) : "None", std::to_string(p) });
-            list.push_back(Switch(3, "Prestige",
+            list.push_back(Switch(4, "Prestige",
                 "Sets the prestige the game starts with, from none to the tenth.",
                 "MW2_CHEAT_PRESTIGE", prestiges, true));
         }
-        list.push_back(Switch(3, "Unlock Everything",
+        list.push_back(Switch(4, "Unlock Everything",
             "Every challenge done, and every title, emblem and killstreak unlocked. Weapons and their "
             "attachments and camouflage come with the challenges.",
             "MW2_CHEAT_UNLOCK_ALL", { { "Off", "" }, { "On", "1" } }, true));
 
         // ---- System
-        list.push_back(Action(4, "Apply and Quit",
+        list.push_back(Action(5, "Apply and Quit",
             "Saves everything and closes the game, so what waits for the next start takes effect. "
             "Open it again from the home screen.",
             [] { crash::RequestExit("quit from the settings menu"); }));
-        list.push_back(Action(4, "Restore Defaults",
+        list.push_back(Action(5, "Restore Defaults",
             "Every setting here back to the console's, from the next start.",
             [] {
                 for (Setting& setting : s.settings)
-                    if (!setting.header && !setting.choices.empty() && setting.category != 3)
+                    if (!setting.header && !setting.choices.empty() && setting.category != 4)
                     {
                         setting.chosen = 0;
                         setting.store(setting.choices[0].value);
@@ -235,7 +278,7 @@ namespace
                     }
                 Notice("Settings restored to the console's");
             }));
-        list.push_back(Action(4, "Menu Shortcut: RB + Start",
+        list.push_back(Action(5, "Menu Shortcut: RB + Start",
             "Hold RB and press Start to open or close this menu. B closes it too.", [] {}));
 
         for (Setting& setting : list)

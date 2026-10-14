@@ -64,3 +64,6 @@ build-ios*/
 build-iossim*/
 ios-game/
 build-*.log
+
+# ---- a development run's learned bot routes and waypoints (runtime/bots/) ----
+/bots/
