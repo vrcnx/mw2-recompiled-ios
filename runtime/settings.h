@@ -12,4 +12,9 @@ namespace settings
     // switch given on the command line still decides. Called once, before
     // anything reads a switch. Returns what it set, for the log.
     std::string Load(const std::filesystem::path& file);
+
+    // Writes NAME=value into the file, in place of a line that sets it or at
+    // its end, and keeps every other line; an empty value takes the line out.
+    // The environment is set to match, for whatever reads the switch again.
+    bool Store(const std::filesystem::path& file, const std::string& name, const std::string& value);
 }

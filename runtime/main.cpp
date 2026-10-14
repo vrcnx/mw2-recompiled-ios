@@ -20,6 +20,7 @@
 #include "platform.h"
 #include "report.h"
 #include "settings.h"
+#include "menu/menu.h"
 
 #include <unistd.h>
 
@@ -220,6 +221,11 @@ static int GuestMain(int argc, char** argv)
         if (!install::LoadImageFile(argv[1], launch.image)) return 1;
         launch.gameRoot = (argc > 2) ? argv[2] : "mw2/game";
     }
+
+    // The settings menu's file, and the cheats it left for this start, done to
+    // the saved stats before the title reads them.
+    menu::SetSettingsFile(install::Folder(argc, argv) / ".env");
+    menu::ApplyAtStart(install::Folder(argc, argv));
 
     crash::Install();
     // Logged in before any other thread runs: Steam reads the app id from the

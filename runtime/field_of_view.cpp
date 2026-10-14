@@ -24,7 +24,10 @@
 #include "env.h"
 #include "log.h"
 
+#include "field_of_view.h"
+
 #include <algorithm>
+#include <atomic>
 
 namespace
 {
@@ -32,17 +35,33 @@ namespace
     constexpr double kWidest = 120.0;
     constexpr double kTitleMost = 170.0;    // T_CG_ViewFov's own upper bound
 
+    // MW2_FOV at the start, and whatever the settings menu sets since: the
+    // hooks read it at every view, so a change shows in the next frame.
+    std::atomic<double> g_scale{ 0.0 };
+
+    double Clamped(double asked)
+    {
+        const double fov = std::clamp(asked, kConsole, kWidest);
+        if (fov != asked) LOGW("fov: MW2_FOV is %g to %g, not %g", kConsole, kWidest, asked);
+        if (fov != kConsole) LOGI("fov: the view is %g degrees where the console's is %g", fov, kConsole);
+        return fov;
+    }
+
     double Scale()
     {
-        static const double scale = [] {
-            const double asked = env::Real("MW2_FOV", kConsole);
-            const double fov = std::clamp(asked, kConsole, kWidest);
-            if (fov != asked) LOGW("fov: MW2_FOV is %g to %g, not %g", kConsole, kWidest, asked);
-            if (fov != kConsole) LOGI("fov: the view is %g degrees where the console's is %g", fov, kConsole);
-            return fov / kConsole;
+        static const bool started = [] {
+            g_scale = Clamped(env::Real("MW2_FOV", kConsole)) / kConsole;
+            return true;
         }();
-        return scale;
+        (void)started;
+        return g_scale.load(std::memory_order_relaxed);
     }
+}
+
+void fov::Set(double degrees)
+{
+    Scale();   // the start's value first, so it cannot land on this one
+    g_scale = Clamped(degrees) / kConsole;
 }
 
 GUEST_HOOK(T_CG_ViewFov)

@@ -9,6 +9,7 @@
 #include "../online/service.h"
 #include "../player.h"
 #include "../signin.h"
+#include "../menu/menu.h"
 #include "../stutters.h"
 #include "../gpu/vulkan/renderer.h"
 
@@ -387,6 +388,15 @@ PPC_FUNC(__imp__XamInputGetState)
         // A scripted stick entry overrides the pad and the autopilot while it is
         // held: a script that says where to look means it.
         for (int i = 0; i < 4; i++) if (g_scriptAxisHeld[user][i]) axes[i] = g_scriptAxes[user][i];
+
+        // The settings menu takes the first controller while it is open, and
+        // the chord that opens it (menu/menu.h).
+        if (user == 0 && menu::Input(b, axes))
+        {
+            b = 0;
+            triggers[0] = triggers[1] = 0;
+            axes[0] = axes[1] = axes[2] = axes[3] = 0;
+        }
 
         // The sign-in screen takes the controllers while it is open, the left
         // stick moving through it as the d-pad does.

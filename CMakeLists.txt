@@ -71,6 +71,7 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/runtime/gpu/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/apu/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/install/*.cpp"
+     "${CMAKE_SOURCE_DIR}/runtime/menu/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/*.cpp")
 
 # The glue build.sh generates from the recompiled output -- a stub for every
@@ -307,6 +308,18 @@ if(MW2_USE_SDL)
     target_sources(mw2 PRIVATE "${MW2_FONTS_SOURCE}")
     target_include_directories(mw2 PRIVATE "${imgui_SOURCE_DIR}")
     target_compile_definitions(mw2 PRIVATE MW2_SIGNIN_PICTURE=1)
+
+    # The settings menu (runtime/menu/, gpu/vulkan/menu_overlay.cpp): Dear
+    # ImGui drawing through its Vulkan backend, and the launcher's editor of
+    # the saved stats for its cheats.
+    target_sources(mw2 PRIVATE
+        "${imgui_SOURCE_DIR}/imgui.cpp"
+        "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+        "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+        "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+        "${CMAKE_SOURCE_DIR}/launcher/profile.cpp")
+    target_include_directories(mw2 PRIVATE "${CMAKE_SOURCE_DIR}/launcher")
 endif()
 
 # Apple's systems have no launcher yet: the game is installed with build.sh's

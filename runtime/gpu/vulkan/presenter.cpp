@@ -47,6 +47,7 @@ uint64_t vk::PresentedFrames() { return 0; }
 #include "capture.h"
 #include "pipeline.h"
 #include "renderer.h"
+#include "menu_overlay.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -375,7 +376,9 @@ namespace
         info.imageExtent = g.extent;
         info.imageArrayLayers = 1;
         // The renderer's frame is blitted in, so a transfer destination.
-        info.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        // Transfer source too, for the screenshots (MW2_SCREENSHOT_AT).
+        info.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.preTransform = caps.currentTransform;
         info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -447,6 +450,8 @@ namespace
         for (uint32_t i = 0; i < kFramesInFlight; i++) fences[i] = g.frames[i].inFlight;
         vk::pipeline::Failed(vkWaitForFences(g.device, kFramesInFlight, fences, VK_TRUE, UINT64_MAX),
                              "the presenter's fences before a resize");
+        // The overlay's views of the old images are done with, as they are.
+        vk::overlay::ForgetSwapchain(g.device);
         if (CreateSwapchain()) g.remakeSwapchain = false;
     }
 
@@ -475,6 +480,101 @@ namespace
     }
 
     void Waiter();
+
+    // MW2_SCREENSHOT_AT=<seconds>[,<seconds>...]: the window's picture as it
+    // goes to the screen -- the frame with the sign-in screen, the settings
+    // menu and the frame counter over it -- written as PPM into
+    // MW2_SCREENSHOTS (the current folder without it) at those times after
+    // the window opens. What a frame dump (MW2_DUMP_FRAMES) cannot show, since
+    // the renderer's frames have nothing of this runtime's own drawn on them.
+    struct Shot
+    {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+        VkDeviceSize size = 0;
+        std::vector<double> at;
+        std::chrono::steady_clock::time_point since;
+        bool started = false;
+        uint32_t taken = 0;
+    } g_shot;
+
+    bool ShotDue()
+    {
+        if (!g_shot.started)
+        {
+            g_shot.started = true;
+            g_shot.since = std::chrono::steady_clock::now();
+            if (const char* list = env::Text("MW2_SCREENSHOT_AT"))
+                for (const char* at = list; *at;)
+                {
+                    char* end = nullptr;
+                    const double seconds = std::strtod(at, &end);
+                    if (end == at) break;
+                    g_shot.at.push_back(seconds);
+                    at = *end == ',' ? end + 1 : end;
+                }
+            std::sort(g_shot.at.begin(), g_shot.at.end(), std::greater<double>());
+        }
+        if (g_shot.at.empty()) return false;
+        const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_shot.since).count();
+        if (elapsed < g_shot.at.back()) return false;
+        g_shot.at.pop_back();
+        return true;
+    }
+
+    bool ShotBuffer(VkDeviceSize size)
+    {
+        if (g_shot.size >= size) return true;
+        if (g_shot.buffer) { vkDestroyBuffer(g.device, g_shot.buffer, nullptr); vkFreeMemory(g.device, g_shot.memory, nullptr); }
+        g_shot = Shot{ VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr, 0, g_shot.at, g_shot.since, true, g_shot.taken };
+        VkBufferCreateInfo info{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        info.size = size;
+        info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        if (vkCreateBuffer(g.device, &info, nullptr, &g_shot.buffer) != VK_SUCCESS) return false;
+        VkMemoryRequirements needs{};
+        vkGetBufferMemoryRequirements(g.device, g_shot.buffer, &needs);
+        VkPhysicalDeviceMemoryProperties memory{};
+        vkGetPhysicalDeviceMemoryProperties(g.physical, &memory);
+        VkMemoryAllocateInfo allocate{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        allocate.allocationSize = needs.size;
+        allocate.memoryTypeIndex = vk::util::FindMemory(memory, needs.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (allocate.memoryTypeIndex == UINT32_MAX ||
+            vkAllocateMemory(g.device, &allocate, nullptr, &g_shot.memory) != VK_SUCCESS ||
+            vkBindBufferMemory(g.device, g_shot.buffer, g_shot.memory, 0) != VK_SUCCESS ||
+            vkMapMemory(g.device, g_shot.memory, 0, VK_WHOLE_SIZE, 0, &g_shot.mapped) != VK_SUCCESS)
+            return false;
+        g_shot.size = size;
+        return true;
+    }
+
+    void WriteShot(uint32_t width, uint32_t height)
+    {
+        const char* folder = env::Text("MW2_SCREENSHOTS");
+        char path[1024];
+        std::snprintf(path, sizeof path, "%s%sscreenshot_%03u.ppm", folder ? folder : "", folder ? "/" : "",
+                      ++g_shot.taken);
+        std::FILE* file = std::fopen(path, "wb");
+        if (!file) { LOGW("vulkan: could not write %s", path); return; }
+        std::fprintf(file, "P6\n%u %u\n255\n", width, height);
+        const bool bgra = g.swapchainFormat == VK_FORMAT_B8G8R8A8_UNORM || g.swapchainFormat == VK_FORMAT_B8G8R8A8_SRGB;
+        std::vector<uint8_t> line(size_t(width) * 3);
+        const auto* pixels = static_cast<const uint8_t*>(g_shot.mapped);
+        for (uint32_t y = 0; y < height; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                const uint8_t* p = pixels + (size_t(y) * width + x) * 4;
+                line[x * 3 + 0] = bgra ? p[2] : p[0];
+                line[x * 3 + 1] = p[1];
+                line[x * 3 + 2] = bgra ? p[0] : p[2];
+            }
+            std::fwrite(line.data(), 1, line.size(), file);
+        }
+        std::fclose(file);
+        LOGI("vulkan: wrote the window's picture to %s", path);
+    }
 
     // The guest's blank follows the display when the display runs at the
     // console's 60 Hz and the device can say when a present reaches it. A
@@ -824,14 +924,37 @@ namespace
             vkCmdClearColorImage(frame.commands, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &colour, 1, &range);
         }
         DrawOverlay(frame, image);
+        // The settings menu and the frame counter, drawn over all of it.
+        const bool menuDrawn = vk::overlay::Draw(
+            { g.instance, g.physical, g.device, g.queue, g.queueFamily, g.swapchainFormat,
+              uint32_t(g.images.size()) },
+            frame.commands, image, g.extent);
 
-        vk::util::Barrier(frame.commands, image, VK_IMAGE_ASPECT_COLOR_BIT,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                          VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                          VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        VkImageLayout layout = menuDrawn ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                                         : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        VkAccessFlags access = menuDrawn ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
+        VkPipelineStageFlags stage = menuDrawn ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                                               : VK_PIPELINE_STAGE_TRANSFER_BIT;
+        const VkDeviceSize shotBytes = VkDeviceSize(g.extent.width) * g.extent.height * 4;
+        const bool shooting = ShotDue() && ShotBuffer(shotBytes);
+        if (shooting)
+        {
+            vk::util::Barrier(frame.commands, image, VK_IMAGE_ASPECT_COLOR_BIT, layout,
+                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, access, VK_ACCESS_TRANSFER_READ_BIT,
+                              stage, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            VkBufferImageCopy copy{};
+            copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copy.imageExtent = { g.extent.width, g.extent.height, 1 };
+            vkCmdCopyImageToBuffer(frame.commands, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_shot.buffer, 1, &copy);
+            layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            access = VK_ACCESS_TRANSFER_READ_BIT;
+            stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        }
+        vk::util::Barrier(frame.commands, image, VK_IMAGE_ASPECT_COLOR_BIT, layout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                          access, 0, stage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
         vkEndCommandBuffer(frame.commands);
 
-        VkPipelineStageFlags wait = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        VkPipelineStageFlags wait = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores = &frame.acquired;
@@ -849,6 +972,9 @@ namespace
             vk::pipeline::Failed(vkQueueSubmit(g.queue, 1, &submit, frame.inFlight),
                                  "the presenter's submission");
         }
+        if (shooting &&
+            vkWaitForFences(g.device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX) == VK_SUCCESS)
+            WriteShot(g.extent.width, g.extent.height);
         // The copy is in the queue ahead of anything the renderer submits from
         // now on, so the renderer may draw over the image.
         if (shown.serial)
@@ -898,6 +1024,11 @@ namespace
         if (g.device)
         {
             vkDeviceWaitIdle(g.device);
+            vk::overlay::Shutdown(g.device);
+            if (g_shot.buffer) vkDestroyBuffer(g.device, g_shot.buffer, nullptr);
+            if (g_shot.memory) vkFreeMemory(g.device, g_shot.memory, nullptr);
+            g_shot.buffer = VK_NULL_HANDLE;
+            g_shot.memory = VK_NULL_HANDLE;
             DestroyOverlay();
             for (auto& frame : g.frames)
             {
@@ -946,8 +1077,15 @@ namespace
         // borderless at the desktop's resolution, which SDL gives a window
         // asked for fullscreen without a mode of its own. F8 toggles it.
         g.fullscreen = env::Flag("MW2_FULLSCREEN");
+        // Apple's screens count windows in points, two or three pixels each:
+        // without high density the swapchain is the points' size, and an
+        // iPad's 2752x2064 panel was given a 1600x1200 picture to stretch.
+        SDL_WindowFlags density = 0;
+#ifdef __APPLE__
+        density = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
         g.window = SDL_CreateWindow("Modern Warfare 2", kWidth, kHeight,
-                                    SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
+                                    SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | density |
                                     (g.fullscreen ? SDL_WINDOW_FULLSCREEN : 0));
         if (!g.window) { LOGW("vulkan: no window (%s)", SDL_GetError()); return false; }
         if (!CreateInstance()) return false;
