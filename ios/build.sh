@@ -69,8 +69,13 @@ stage)
     out=ios-game/game
     rm -rf ios-game && mkdir -p "$out"
     cp -c "$mw2/$xex" "$out/"
-    # The disc version's folder holds links into mw2/game; -L copies what they name.
-    cp -cL "$data"/* "$out/"
+    # The disc version's folder holds links into mw2/game; -L copies what they
+    # name. The multiplayer plays no movies (docs/multiplayer.md), so its
+    # folder goes without the 1.3 GB of them.
+    for f in "$data"/*; do
+        [ "$TITLE" = mp ] && [ "${f##*.}" = bik ] && continue
+        cp -cL "$f" "$out/"
+    done
     echo "Staged $(ls "$out" | wc -l | tr -d ' ') files, $(du -shL "$out" | cut -f1), in $root/$out"
     echo "Copy it in: Finder > your iPad > Files > drag the game folder onto $MW2_IOS_DISPLAY_NAME."
     exit 0

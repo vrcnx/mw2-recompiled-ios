@@ -183,6 +183,12 @@ if(MW2_USE_SDL)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON  CACHE BOOL "" FORCE)
     set(SDL_TEST   OFF CACHE BOOL "" FORCE)
+    if(APPLE)
+        # The window is Vulkan's (MoltenVK); iOS has deprecated OpenGL ES and
+        # the app does not link it.
+        set(SDL_OPENGL   OFF CACHE BOOL "" FORCE)
+        set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+    endif()
     FetchContent_MakeAvailable(SDL3)
     target_link_libraries(mw2 PRIVATE SDL3::SDL3-static)
     target_compile_definitions(mw2 PRIVATE MW2_USE_SDL=1)
