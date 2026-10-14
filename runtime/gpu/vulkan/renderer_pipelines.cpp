@@ -513,7 +513,9 @@ namespace vk::renderer::detail
     // renderer's part is copying what goes in it.
     void PersistCaches()
     {
-        static size_t saved = 0;
+        // What the caches held when they were read counts as kept: a start
+        // that built nothing new rewrote 76 MB of pipeline cache for nothing.
+        static size_t saved = g.recorded.size();
         static auto lastSave = std::chrono::steady_clock::now();
         const char* path = ShaderCachePath();
         if (!path) return;

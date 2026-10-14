@@ -77,7 +77,10 @@ targets:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UIApplicationSupportsIndirectInputEvents: false
-        GCSupportsControllerUserInteraction: true
+        # Not true: iPadOS then also hands the controller to UIKit as presses
+        # for its own navigation, which SDL reports as arrow, Return and
+        # Escape keys -- every button arrived twice (runtime/kernel/input.cpp).
+        GCSupportsControllerUserInteraction: false
         GCSupportedGameControllers:
           - ProfileName: ExtendedGamepad
         CADisableMinimumFrameDurationOnPhone: true

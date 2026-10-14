@@ -2,8 +2,12 @@
 // "no controller connected", which is a truthful answer the title handles.
 #include <ppc_recomp_shared.h>
 #include "kernel.h"
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include "../guest.h"
 #include "../log.h"
+#include "../env.h"
 #include "../diagnostics.h"
 #include "../console.h"
 #include "../online/service.h"
@@ -313,7 +317,17 @@ PPC_FUNC(__imp__XamInputGetState)
 #ifdef MW2_USE_SDL
     if (user >= 4) { *out = XInputState{}; ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
     SDL_Gamepad* pad = PadFor(user);
-    const uint16_t elsewhere = uint16_t((user == 0 ? KeyboardButtons() : 0) | ScriptedButtons(user));
+    // iPadOS turns a controller into keys for its own navigation -- the stick
+    // into arrows, A into Return, B into Escape -- and SDL reports them as the
+    // keyboard: the title saw every press twice, A as A and Start (the pause
+    // menu), and a stick moving through a menu as the stick and the d-pad.
+    // While a controller is there, its keys are not read.
+#if defined(__APPLE__) && TARGET_OS_IOS
+    const bool keyboard = user == 0 && !pad;
+#else
+    const bool keyboard = user == 0;
+#endif
+    const uint16_t elsewhere = uint16_t((keyboard ? KeyboardButtons() : 0) | ScriptedButtons(user));
     if (pad || elsewhere || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
     {
 
@@ -388,6 +402,34 @@ PPC_FUNC(__imp__XamInputGetState)
         // A scripted stick entry overrides the pad and the autopilot while it is
         // held: a script that says where to look means it.
         for (int i = 0; i < 4; i++) if (g_scriptAxisHeld[user][i]) axes[i] = g_scriptAxes[user][i];
+
+        // MW2_INPUT_LOG=1: every change of what the first pad holds, as SDL
+        // names it and as the title is given it, with the time -- what a
+        // button doing the wrong thing, or one press counting twice, needs.
+        static const bool logInput = env::Flag("MW2_INPUT_LOG");
+        if (logInput && user == 0 && pad)
+        {
+            static uint32_t lastRaw = 0;
+            static uint16_t lastGiven = 0;
+            uint32_t raw = 0;
+            for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT; i++)
+                if (SDL_GetGamepadButton(pad, SDL_GamepadButton(i))) raw |= 1u << i;
+            if (raw != lastRaw || b != lastGiven)
+            {
+                std::string names;
+                for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT; i++)
+                    if (raw & (1u << i))
+                    {
+                        const char* name = SDL_GetGamepadStringForButton(SDL_GamepadButton(i));
+                        names += std::string(names.empty() ? "" : "+") + (name ? name : "?");
+                    }
+                const double at = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                LOGI("input: %.3f pad %s -> title %04X", at, names.empty() ? "nothing" : names.c_str(), b);
+                lastRaw = raw;
+                lastGiven = b;
+            }
+        }
 
         // The settings menu takes the first controller while it is open, and
         // the chord that opens it (menu/menu.h).
