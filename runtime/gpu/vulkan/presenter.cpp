@@ -188,7 +188,24 @@ namespace
         uint32_t extensionCount = 0;
         const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
         if (!sdlExtensions) { LOGW("vulkan: SDL has no instance extensions (%s)", SDL_GetError()); return false; }
-        std::vector<const char*> extensions(sdlExtensions, sdlExtensions + extensionCount);
+        // Only what the driver has. SDL on macOS asks for the portability
+        // enumeration a Vulkan loader carries; MoltenVK linked in has no
+        // loader in front of it, and an instance asked for it is refused.
+        uint32_t offered = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &offered, nullptr);
+        std::vector<VkExtensionProperties> available(offered);
+        vkEnumerateInstanceExtensionProperties(nullptr, &offered, available.data());
+        auto has = [&](const char* name) {
+            return std::any_of(available.begin(), available.end(),
+                               [&](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; });
+        };
+        std::vector<const char*> extensions;
+        for (uint32_t i = 0; i < extensionCount; i++)
+        {
+            if (has(sdlExtensions[i])) extensions.push_back(sdlExtensions[i]);
+            else LOGI("vulkan: instance extension %s is not offered here; going without", sdlExtensions[i]);
+        }
+        const bool portability = has("VK_KHR_portability_enumeration");
 
         VkApplicationInfo app{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
         app.pApplicationName = "mw2recomp";
@@ -206,6 +223,8 @@ namespace
 
         VkInstanceCreateInfo info{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
         info.pNext = validating ? &messenger : nullptr;   // instance creation's own messages
+        // Through a loader, MoltenVK's device is listed only when asked for.
+        if (portability) info.flags |= 0x00000001;   // VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
         info.pApplicationInfo = &app;
         info.enabledExtensionCount = uint32_t(extensions.size());
         info.ppEnabledExtensionNames = extensions.data();

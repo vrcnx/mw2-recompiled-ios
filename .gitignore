@@ -63,3 +63,4 @@ ios/Info.plist
 build-ios*/
 build-iossim*/
 ios-game/
+build-*.log

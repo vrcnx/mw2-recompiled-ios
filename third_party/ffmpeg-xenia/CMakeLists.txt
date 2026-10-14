@@ -207,7 +207,11 @@ target_compile_definitions(ffmpeg_xma PRIVATE
 target_compile_options(ffmpeg_xma PRIVATE -w -std=gnu17 -fno-strict-aliasing -fomit-frame-pointer
     -Wno-error=incompatible-pointer-types)
 set_target_properties(ffmpeg_xma PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(NOT WIN32)
+if(APPLE)
+    # The subtitle decoder's charset conversion: in glibc on Linux, a library
+    # of its own on Apple's systems.
+    target_link_libraries(ffmpeg_xma PUBLIC pthread m iconv)
+elseif(NOT WIN32)
     target_link_libraries(ffmpeg_xma PUBLIC pthread m)
 else()
     # libavutil's random seed.

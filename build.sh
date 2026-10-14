@@ -56,18 +56,21 @@ if [ -n "$RELEASE" ] && [ "$RELEASE" != 0 ]; then BUILD=$BUILD-release; DIAGNOST
 # clang lacks nothing the runtime needs, but one compiler for the tools, the
 # game and the iOS build (ios/build.sh) keeps their C++ library the same. A
 # deployment target is always given: without one, Homebrew's libc++ headers
-# reach for symbols only its own library has.
+# reach for symbols only its own library has. 15, for the Metal residency sets
+# MoltenVK uses.
 if [ "$(uname)" = Darwin ]; then
     LLVM=${LLVM:-/opt/homebrew/opt/llvm/bin}
     [ -x "$LLVM/clang++" ] || { echo "no clang++ in $LLVM: brew install llvm, or set LLVM=<its bin folder>"; exit 1; }
     HOST_CC=$LLVM/clang
     HOST_CXX=$LLVM/clang++
     NPROC=$(sysctl -n hw.ncpu)
-    HOST_CMAKE="-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+    # Xcode's SDK by name: left to itself Homebrew's clang takes the Command
+    # Line Tools' one, which can be years older than the system.
+    HOST_CMAKE="-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-15.0} -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path)"
     # XenonRecomp's fmt leans on <cstdlib> arriving through other headers,
     # which newer libc++ no longer does.
     HOST_TOOL_FLAGS="-include cstdlib -include cstring"
-    export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}
+    export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-15.0}
 else
     HOST_CC=clang-18
     HOST_CXX=clang++-18
