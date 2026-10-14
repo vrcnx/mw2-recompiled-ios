@@ -142,6 +142,10 @@ if [ "$sdk" = iphonesimulator ]; then
     exec xcrun simctl launch --console-pty --terminate-running-process "$MW2_IOS_SIMULATOR" "$MW2_IOS_APP_ID"
 else
     args=(); [ -n "${MW2_IOS_DEVICE:-}" ] && args=(--device "$MW2_IOS_DEVICE")
+    # Installed over a copy that is still running, the app was left refusing
+    # to open ("invalid code signature") until installed again: stop it first.
+    pid=$(xcrun devicectl device info processes "${args[@]}" 2>/dev/null | awk '/MW2\.app\/MW2/ {print $1; exit}')
+    [ -n "$pid" ] && xcrun devicectl device process terminate "${args[@]}" --pid "$pid" > /dev/null 2>&1 || true
     xcrun devicectl device install app "${args[@]}" "$app"
     exec xcrun devicectl device process launch --console --terminate-existing "${args[@]}" "$MW2_IOS_APP_ID"
 fi
