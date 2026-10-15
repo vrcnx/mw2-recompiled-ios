@@ -68,7 +68,8 @@ this checkout (or pass `-DMW2_MOLTENVK=<its MoltenVK folder>`).
    stages `ios-game/game/` (APFS clones, no space taken): the executable the
    app was built from and every fastfile, archive and movie, about 7 GB. In
    Finder, select the iPad, open *Files*, and drag the `game` folder onto the
-   app. `devicectl` gives up on files this size.
+   app, or copy the files one at a time with `xcrun devicectl device copy to
+   --domain-type appDataContainer` into `Documents/game/`.
 
 The multiplayer and the campaign are separate apps (`TITLE=mp`, `TITLE=sp`),
 as they are separate executables on the disc; a title asking for the other one
