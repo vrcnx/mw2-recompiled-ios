@@ -74,3 +74,24 @@ The multiplayer and the campaign are separate apps (`TITLE=mp`, `TITLE=sp`),
 as they are separate executables on the disc; a title asking for the other one
 from its menus says the other app has to be opened. Saves, `.env` settings and
 logs live in the app's Documents too, which the Files app shows.
+
+## Playing
+
+- **The settings menu:** hold RB and press Start. The d-pad or left stick
+  moves, left and right change a value, LB and RB change category, B
+  closes. Every setting is written to `.env` in the app's Documents;
+  those marked *next start* take effect when the app is opened again
+  (System > Apply and Quit).
+- **Bots:** Bots > Number of Bots, then host a match: System Link >
+  Private Match. They join a moment after it starts. Without waypoints
+  they learn a map from where players walk, into `bots/learned/` in the
+  app's Documents, and get around it better the more it is played. Bot
+  Warfare's waypoint files (`<map>_wp.csv`, not included: they carry no
+  license) are used instead when placed in `bots/waypoints/`.
+- **Cheats** (max rank, prestige, unlock everything) are done to the
+  saved stats at the next start, which exist once a match has been
+  finished.
+- **Performance:** a new pipeline is compiled on a thread of its own the
+  first time it is needed, and something new on screen may appear a
+  moment late that once; the compiled pipelines are kept in
+  `pipelines.cache` and `shaders.cache` in the app's Documents.

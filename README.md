@@ -4,6 +4,33 @@ Call of Duty: Modern Warfare 2 (2009) for the Xbox 360, running natively on PC.
 Not an emulator: the game's executables are recompiled ahead of time. No game
 files are included; you need your own disc.
 
+> **iPad, iPadOS and macOS port (this fork)** by [CNX (@vrcnx)](https://github.com/vrcnx),
+> built with [Claude Code](https://claude.com/claude-code). Call of Duty: Modern
+> Warfare 2 multiplayer running natively on Apple Silicon: M-series iPads (iPad
+> Pro, iPad Air) and Macs, at 60 fps with an Xbox or PlayStation controller.
+> No emulator and no streaming. Upstream project:
+> [PaulCombal/mw2-recompiled](https://github.com/PaulCombal/mw2-recompiled).
+>
+> - **iPadOS / iOS app** — Vulkan through MoltenVK on Metal, the panel's full
+>   resolution, a 4:3 picture that fills the iPad's screen, ProMotion 120 Hz
+>   pacing, pause and resume when the app is put away.
+> - **macOS (Apple Silicon)** — the same runtime as a native arm64 build.
+> - **Offline bots** — up to 17 bots in System Link and Private Match, played
+>   by a brain of this port's own: field of view and line of sight, reaction
+>   time, human-speed aim, strafing, hunting, four skill levels, and routes
+>   learned from where players walk (or [Bot Warfare](https://github.com/ineedbots/iw4_bot_warfare)
+>   waypoints, if you add them).
+> - **Settings menu** (RB + Start), in the style of the Skate 3 iPad port:
+>   resolution scale, frame rate, aspect ratio, anti-aliasing, field of view,
+>   bots, and cheats — max rank, prestige, unlock everything.
+> - **No stutter** — shader pipelines compiled off the draw and kept between
+>   launches.
+>
+> Building, installing the game and iPad notes: [ios/README.md](ios/README.md).
+> The Skate 3 iPad port is [vrcnx/skate3recomp-ios](https://github.com/vrcnx/skate3recomp-ios).
+>
+> ![The settings menu over the multiplayer menu](docs/images/settings-menu.jpg)
+
 ![The multiplayer menu, running in a window](docs/images/multiplayer-menu.png)
 
 **[Download the latest release](../../releases/latest)**
