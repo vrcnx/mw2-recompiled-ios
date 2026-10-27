@@ -879,6 +879,53 @@ void kernel::UnlockStatsBeforeRead(const fs::path& file)
     }
 }
 
+// Split screen and system link play with the offline stats package, which the
+// title makes at level 1 for a player who has never saved one -- a profile new
+// to this machine, or one whose rank was only ever kept by Live. It starts
+// instead from his Live stats, or failing those the first player's, or any
+// player's package here: the offline package is the Live file behind four
+// leading bytes and before one more (docs/saves.md). Reading it then unlocks
+// it (UnlockStatsBeforeRead).
+void kernel::SeedOfflineStats(const fs::path& package, const std::string& name)
+{
+    if (const char* on = env::Text("MW2_UNLOCK_ALL_PLAYERS"); on && !env::Flag("MW2_UNLOCK_ALL_PLAYERS"))
+        return;
+    constexpr size_t kLead = 4, kStored = 8192;
+    if (name.size() != 23) return;   // mpdata_ and a XUID's sixteen digits
+    auto read = [](const fs::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::vector<char>{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+    };
+    const fs::path& saves = SaveRoot();
+    const fs::path users = saves / "online" / "user";
+    // His Live XUID is his offline one's low 48 bits under 0009.
+    std::vector<char> stats, live = read(users / ("0009" + name.substr(11)) / "mpdata");
+    std::string from = "his Live stats";
+    if (live.size() != kStored)
+    {
+        live = read(users / XuidText(LocalOnlineXuid()) / "mpdata");
+        from = "the first player's Live stats";
+    }
+    if (live.size() == kStored)
+    {
+        stats = { 0, 0, 0, 2 };
+        stats.insert(stats.end(), live.begin(), live.end());
+        stats.push_back(0);
+    }
+    std::error_code ec;
+    for (fs::directory_iterator it(saves, ec), end; stats.empty() && !ec && it != end; it.increment(ec))
+    {
+        const std::string other = it->path().filename().string();
+        if (other.rfind("mpdata_", 0) != 0 || other == name) continue;
+        stats = read(it->path() / other);
+        from = other;
+        if (stats.size() != kLead + kStored + 1) stats.clear();
+    }
+    if (stats.empty() || !fs::create_directories(package, ec)) return;
+    std::ofstream(package / name, std::ios::binary).write(stats.data(), std::streamsize(stats.size()));
+    LOGI("xam: %s had no stats here; it starts from %s, unlocked as it is read", name.c_str(), from.c_str());
+}
+
 void kernel::MovePlayerData(uint64_t from, uint64_t to)
 {
     from &= 0xFFFFFFFFFFFFull;

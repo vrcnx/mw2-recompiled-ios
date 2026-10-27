@@ -164,6 +164,10 @@ PPC_FUNC(__imp__XamContentCreateEx)
     const uint32_t device = *GuestPtr<be32>(contentData + kContentDeviceId);
     const fs::path package = SaveRoot() / file;
     std::error_code ec;
+    const uint32_t asked = flags & 0xF;
+    if ((asked == kOpenExisting || asked == kOpenAlways) && file.rfind("mpdata_", 0) == 0 &&
+        !fs::is_directory(package, ec))
+        kernel::SeedOfflineStats(package, file);
     const bool existed = fs::is_directory(package, ec);
 
     // "Create always" and "truncate" both mean the package the title gets is a

@@ -100,6 +100,10 @@ namespace kernel
     // signs in here -- every split-screen controller, any profile -- plays
     // with everything (kernel/xam.cpp).
     void UnlockStatsBeforeRead(const std::filesystem::path& file);
+    // A player's offline stats package (`mpdata_<offline XUID>`) asked for
+    // before any was saved, made from stats already here, so that he too
+    // starts unlocked rather than at level 1 (MW2_UNLOCK_ALL_PLAYERS).
+    void SeedOfflineStats(const std::filesystem::path& package, const std::string& name);
 
     // The one storage device this runtime offers. The title takes the id from the
     // device selector, hands it back in every content call and stores it in the
