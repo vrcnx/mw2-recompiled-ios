@@ -9,6 +9,8 @@
 #include "../field_of_view.h"
 #include "profile.h"   // launcher/profile.h: the saved stats' editor
 #include "../bots/bots.h"
+#include "../signin.h"
+#include "../install/install.h"
 
 #include <algorithm>
 #include <atomic>
@@ -25,6 +27,7 @@ namespace
     // XINPUT_GAMEPAD's buttons.
     constexpr uint16_t kUp = 0x0001, kDown = 0x0002, kLeft = 0x0004, kRight = 0x0008;
     constexpr uint16_t kStart = 0x0010, kLB = 0x0100, kRB = 0x0200, kA = 0x1000, kB = 0x2000;
+    constexpr uint16_t kX = 0x4000;
     constexpr uint16_t kChord = kRB | kStart;
 
     struct Choice { std::string label, value; };
@@ -42,6 +45,7 @@ namespace
         std::function<void()> act;          // an action's work
         int chosen = 0;
         bool header = false;
+        bool playerName = false;            // the name editor's row
     };
 
     struct Category { std::string name, description; };
@@ -70,7 +74,32 @@ namespace
         Clock::time_point repeatAt;
         bool stickUp = false, stickDown = false, stickLeft = false, stickRight = false;
         std::filesystem::path file = ".env";
+        // The player's name, edited a letter at a time with the controller:
+        // up and down choose the letter, left and right move, X takes one out,
+        // A keeps it, B leaves it as it was.
+        bool editing = false;
+        std::string edit;
+        int cursor = 0;
+        std::string newName;   // saved this run, shown from the next start
     } s;
+
+    constexpr const char kNameLetters[] =
+        " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    constexpr int kNameLength = 15;   // profiles.txt (launcher/profile.cpp)
+
+    std::string ShownName()
+    {
+        if (!s.newName.empty()) return s.newName;
+        const signin::Player first = signin::First();
+        return first.name.empty() ? "Player" : first.name;
+    }
+
+    std::string Trimmed(std::string name)
+    {
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+        return name;
+    }
 
     std::atomic<bool> g_open{ false };
     std::atomic<bool> g_counter{ false };
@@ -185,6 +214,19 @@ namespace
         }
 
         // ---- Gameplay
+        list.push_back(Header(2, "Player"));
+        {
+            Setting name;
+            name.category = 2;
+            name.label = "Player Name";
+            name.description =
+                "Your name, as other players see it in the game and on the network. A edits it: up and "
+                "down choose each letter, left and right move, X takes one out, A saves and B cancels. "
+                "It shows from the next start.";
+            name.restart = true;
+            name.playerName = true;
+            list.push_back(std::move(name));
+        }
         {
             std::vector<Choice> angles;
             for (int degrees = 65; degrees <= 120; degrees += 5)
@@ -271,6 +313,22 @@ namespace
             "Saves everything and closes the game, so what waits for the next start takes effect. "
             "Open it again from the home screen.",
             [] { crash::RequestExit("quit from the settings menu"); }));
+        {
+#if TARGET_OS_IOS
+            const char* how = " The app closes; open it again and it starts there.";
+#else
+            const char* how = " The game restarts there.";
+#endif
+#ifdef MW2_TITLE_MP
+            list.push_back(Action(5, "Go to Campaign and Special Ops",
+                std::string("Leaves the multiplayer for the campaign and Special Ops.") + how,
+                [] { install::SwitchTitle(); crash::RequestExit("switching to the campaign"); }));
+#else
+            list.push_back(Action(5, "Go to Multiplayer",
+                std::string("Leaves the campaign for the multiplayer.") + how,
+                [] { install::SwitchTitle(); crash::RequestExit("switching to the multiplayer"); }));
+#endif
+        }
         list.push_back(Action(5, "Restore Defaults",
             "Every setting here back to the console's, from the next start.",
             [] {
@@ -324,6 +382,13 @@ namespace
 
     void Activate(Setting& setting)
     {
+        if (setting.playerName)
+        {
+            s.editing = true;
+            s.edit = ShownName();
+            s.cursor = int(s.edit.size()) - 1;
+            return;
+        }
         if (setting.act) { setting.act(); return; }
         // A on a value steps it on, round to the first after the last.
         if (setting.choices.empty()) return;
@@ -379,7 +444,7 @@ bool menu::Input(uint16_t buttons, const int16_t axes[4])
     // The chord itself is not the title's either: Start would pause it.
     if (!s.open) return chord;
 
-    uint16_t now = buttons & uint16_t(kUp | kDown | kLeft | kRight | kLB | kRB | kA | kB);
+    uint16_t now = buttons & uint16_t(kUp | kDown | kLeft | kRight | kLB | kRB | kA | kB | kX);
     Stick(axes, now);
     const uint16_t pressed = uint16_t(now & ~s.held);
     const auto time = Clock::now();
@@ -394,6 +459,52 @@ bool menu::Input(uint16_t buttons, const int16_t axes[4])
     }
     s.held = now;
     if (chord) return true;
+
+    if (s.editing)
+    {
+        std::string& name = s.edit;
+        if (name.empty()) name = " ";
+        s.cursor = std::clamp(s.cursor, 0, int(name.size()) - 1);
+        const std::string letters = kNameLetters;
+        if (steps & (kUp | kDown))
+        {
+            size_t at = letters.find(name[size_t(s.cursor)]);
+            if (at == std::string::npos) at = 0;
+            const size_t count = letters.size();
+            at = (steps & kUp) ? (at + 1) % count : (at + count - 1) % count;
+            name[size_t(s.cursor)] = letters[at];
+        }
+        if (steps & kLeft) s.cursor = std::max(0, s.cursor - 1);
+        if (steps & kRight)
+        {
+            if (s.cursor + 1 >= int(name.size()) && int(name.size()) < kNameLength) name += 'A';
+            s.cursor = std::min(int(name.size()) - 1, s.cursor + 1);
+        }
+        if ((pressed & kX) && name.size() > 1)
+        {
+            name.erase(size_t(s.cursor), 1);
+            s.cursor = std::min(s.cursor, int(name.size()) - 1);
+        }
+        if (pressed & kB) { s.editing = false; return true; }
+        if (pressed & kA)
+        {
+            const std::string chosen = Trimmed(name);
+            profile::Player player;
+            player.id = signin::First().id;
+            std::string error;
+            if (chosen.empty()) Notice("A name needs at least one letter");
+            else if (!profile::Rename(player, chosen, error)) Notice(error);
+            else
+            {
+                s.newName = chosen;
+                s.editing = false;
+                s.restartPending = true;
+                LOGI("menu: the player's name is now \"%s\" from the next start", chosen.c_str());
+                Notice("Name saved: " + chosen + ". It shows from the next start.");
+            }
+        }
+        return true;
+    }
 
     const int categories = int(kCategories.size());
     if (pressed & kB) { s.open = false; g_open = false; LOGI("menu: closed"); return true; }
@@ -431,7 +542,20 @@ menu::View menu::Snapshot()
         row.header = setting.header;
         row.action = !setting.choices.size();
         row.restart = setting.restart;
-        if (!setting.choices.empty())
+        if (setting.playerName)
+        {
+            row.action = false;
+            if (s.editing)
+            {
+                // The letter being chosen, between brackets.
+                const std::string& name = s.edit;
+                const size_t at = size_t(std::clamp(s.cursor, 0, int(name.size()) - 1));
+                row.value = name.substr(0, at) + "[" + name.substr(at, 1) + "]" + name.substr(at + 1);
+            }
+            else
+                row.value = ShownName();
+        }
+        else if (!setting.choices.empty())
         {
             row.value = setting.choices[size_t(setting.chosen)].label;
             row.canLeft = setting.chosen > 0;

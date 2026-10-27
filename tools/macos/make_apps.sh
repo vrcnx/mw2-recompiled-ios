@@ -1,9 +1,12 @@
 #!/bin/bash
-# Packages the macOS builds as two apps in a player's folder:
-#   MW2 Campaign.app     the campaign and Special Ops (build-release-<v>/mw2)
-#   MW2 Multiplayer.app  (build-mp-release-<v>/mw2)
-# beside the folder's game/, saves/, bots/ and .env, which stay outside the
-# apps (runtime/install/install.cpp steps out of a bundle to find them).
+# Packages the macOS builds as one app in a player's folder, MW2.app, holding
+# both of the game's programs in Contents/MacOS:
+#   mw2-sp   the campaign and Special Ops (build-release-<v>/mw2), what opens
+#   mw2-mp   the multiplayer (build-mp-release-<v>/mw2)
+# The app opens on the one last played, and the game's own menus switch
+# between them (runtime/install/install.cpp). The folder's game/, saves/,
+# bots/ and .env stay outside the app, which the runtime steps out of to find
+# them.
 #
 # The bundle is what macOS keys its treatment of a game on: Game Mode (games
 # category, GCSupportsGameMode), Retina drawables (NSHighResolutionCapable,
@@ -36,23 +39,27 @@ if [ -f "$icon_png" ]; then
     icns="$work/AppIcon.icns"
 fi
 
-make_app() {
-    local name=$1 exe=$2 binary=$3 id=$4
-    [ -x "$binary" ] || { echo "skipping $name: no $binary (build it with build.sh)"; return; }
-    local app="$DEST/$name.app"
-    rm -rf "$app"
-    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-    cp "$binary" "$app/Contents/MacOS/$exe"
-    [ -z "$icns" ] || cp "$icns" "$app/Contents/Resources/AppIcon.icns"
-    cat > "$app/Contents/Info.plist" <<PLIST
+sp="$ROOT/build-release$SUFFIX/mw2"
+mp="$ROOT/build-mp-release$SUFFIX/mw2"
+for binary in "$sp" "$mp"; do
+    [ -x "$binary" ] || { echo "error: no $binary (build it with build.sh)" >&2; exit 1; }
+done
+app="$DEST/MW2.app"
+# The two apps of earlier versions of this script.
+rm -rf "$app" "$DEST/MW2 Campaign.app" "$DEST/MW2 Multiplayer.app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp "$sp" "$app/Contents/MacOS/mw2-sp"
+cp "$mp" "$app/Contents/MacOS/mw2-mp"
+[ -z "$icns" ] || cp "$icns" "$app/Contents/Resources/AppIcon.icns"
+cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key><string>$name</string>
-	<key>CFBundleDisplayName</key><string>$name</string>
-	<key>CFBundleIdentifier</key><string>$PREFIX.$id</string>
-	<key>CFBundleExecutable</key><string>$exe</string>
+	<key>CFBundleName</key><string>MW2</string>
+	<key>CFBundleDisplayName</key><string>MW2</string>
+	<key>CFBundleIdentifier</key><string>$PREFIX</string>
+	<key>CFBundleExecutable</key><string>mw2-sp</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>1.0</string>
 	<key>CFBundleVersion</key><string>1</string>
@@ -68,9 +75,7 @@ make_app() {
 </dict>
 </plist>
 PLIST
+# The second program first: the app's signature seals it.
+codesign --force --sign - "$app/Contents/MacOS/mw2-mp" > /dev/null 2>&1 &&
     codesign --force --sign - "$app" > /dev/null 2>&1 || echo "warning: could not sign $app"
-    echo "made $app"
-}
-
-make_app "MW2 Campaign" mw2-sp "$ROOT/build-release$SUFFIX/mw2" sp
-make_app "MW2 Multiplayer" mw2-mp "$ROOT/build-mp-release$SUFFIX/mw2" mp
+echo "made $app"

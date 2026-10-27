@@ -44,4 +44,8 @@ namespace install
     // this run has let go of the window and the sound.
     void SetNextTitle(const std::string& xex);
     void StartNextTitle();
+
+    // The other executable next, asked for by the player rather than the
+    // title: the campaign's for the multiplayer and the other way round.
+    void SwitchTitle();
 }

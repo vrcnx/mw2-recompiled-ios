@@ -37,13 +37,15 @@ and MoltenVK: extract `MoltenVK-all.tar` from
 `../deps/moltenvk/MoltenVK/MoltenVK/static/MoltenVK.xcframework` exists beside
 this checkout (or pass `-DMW2_MOLTENVK=<its MoltenVK folder>`).
 
-1. Recompile the executable and extract the game, on the Mac, as on Linux
-   ([building.md](../docs/building.md)). The multiplayer, with title update 6:
+1. Recompile both executables and extract the game, on the Mac, as on Linux
+   ([building.md](../docs/building.md)). With title update 6:
 
+       TITLE=sp ISO=<the disc image> TU=<the update's package> ./build.sh
        TITLE=mp ISO=<the disc image> TU=<the update's package> ./build.sh
 
    or the disc's own version, without the update:
 
+       VERSION=tu0 TITLE=sp ISO=<the disc image> ./build.sh
        VERSION=tu0 TITLE=mp ISO=<the disc image> ./build.sh
 
    This also builds the game for macOS, which runs as on Linux:
@@ -54,27 +56,32 @@ this checkout (or pass `-DMW2_MOLTENVK=<its MoltenVK folder>`).
        MW2_IOS_TEAM=ABCDE12345
        MW2_IOS_BUNDLE_ID=com.you.mw2
 
-3. Build, install and start the app on a connected iPad, with the same `TITLE`
-   (and `VERSION`) as step 1:
+3. Build, install and start the app on a connected iPad, with the same
+   `VERSION` as step 1:
 
-       TITLE=mp ios/build.sh device --run
+       ios/build.sh device --run
 
    `ios/build.sh sim --run` builds for the simulator instead.
 
 4. Copy the game in:
 
-       TITLE=mp ios/build.sh stage
+       ios/build.sh stage
 
-   stages `ios-game/game/` (APFS clones, no space taken): the executable the
-   app was built from and every fastfile, archive and movie, about 7 GB. In
+   stages `ios-game/game/` (APFS clones, no space taken): the two executables
+   the app was built from and every fastfile, archive and movie, about 7 GB. In
    Finder, select the iPad, open *Files*, and drag the `game` folder onto the
    app, or copy the files one at a time with `xcrun devicectl device copy to
    --domain-type appDataContainer` into `Documents/game/`.
 
-The multiplayer and the campaign are separate apps (`TITLE=mp`, `TITLE=sp`),
-as they are separate executables on the disc; a title asking for the other one
-from its menus says the other app has to be opened. Saves, `.env` settings and
-logs live in the app's Documents too, which the Files app shows.
+The campaign (with Special Ops) and the multiplayer are separate executables
+on the disc, and each is built with its own copy of the runtime into a
+framework of its own, `MW2SP` and `MW2MP`. One app holds both: its loader
+(`main.m`) starts the one last played, recorded in `title` in the app's
+Documents. iOS apps cannot restart themselves, so choosing the other from the
+game's menus, or System > Go to Multiplayer / Go to Campaign and Special Ops
+in the settings menu, closes the app, and it opens there the next time. Saves,
+`.env` settings and logs live in the app's Documents too, which the Files app
+shows.
 
 ## Playing
 

@@ -4,6 +4,7 @@
 #include "spawn.h"
 #include "../log.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,7 @@
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #include <mach-o/dyld.h>
+#include <unistd.h>
 #endif
 #ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
@@ -49,6 +51,18 @@ namespace
         return std::string(text.begin(), text.end());
     }
 
+#if defined(__APPLE__) && !TARGET_OS_IOS
+    // The folder the running program is in, inside the app or not.
+    fs::path ProgramFolder()
+    {
+        char path[4096];
+        uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) != 0) return {};
+        std::error_code ec;
+        return fs::weakly_canonical(path, ec).parent_path();
+    }
+#endif
+
     fs::path ExecutableFolder()
     {
 #ifdef _WIN32
@@ -63,12 +77,8 @@ namespace
         const char* home = std::getenv("HOME");   // the app's data container
         return fs::path(home ? home : "") / "Documents";
 #elif defined(__APPLE__)
-        char path[4096];
-        uint32_t size = sizeof(path);
-        if (_NSGetExecutablePath(path, &size) != 0) return {};
-        std::error_code ec;
-        const fs::path folder = fs::weakly_canonical(path, ec).parent_path();
-        // Packaged as <name>.app (tools/macos/make_apps.sh): the player's
+        const fs::path folder = ProgramFolder();
+        // Packaged as MW2.app (tools/macos/make_apps.sh): the player's
         // game/, saves/ and .env are beside the app, never inside it, where
         // they would break its signature.
         if (folder.filename() == "MacOS" && folder.parent_path().filename() == "Contents" &&
@@ -121,19 +131,78 @@ namespace
         return nullptr;
     }
 
-#if defined(__APPLE__) && !TARGET_OS_IOS
-    // The app each executable is packaged in on macOS (tools/macos/make_apps.sh).
-    const char* AppFor(const std::string& xex)
+    // The other executable's program: beside this one, or, in the one app
+    // that holds both on macOS (tools/macos/make_apps.sh), in Contents/MacOS.
+    fs::path ProgramFile(const std::string& xex)
     {
-        if (xex == "default.xex") return "MW2 Campaign.app";
-        if (xex == "default_mp.xex") return "MW2 Multiplayer.app";
-        return nullptr;
-    }
+        const char* program = ProgramFor(xex);
+        if (!program) return {};
+        std::error_code ec;
+        fs::path file = fs::absolute(program, ec);
+#if defined(__APPLE__) && !TARGET_OS_IOS
+        if (!fs::is_regular_file(file, ec)) file = ProgramFolder() / program;
 #endif
+        return file;
+    }
 
     constexpr const char* kLaunchDataVariable = "MW2_LAUNCH_DATA";
     bool g_playerStart = false;
     std::string g_nextTitle;
+
+    // Which of the two executables the player's copy last ran ("sp" or "mp"),
+    // kept in its folder: the one app that holds both opens on the title it
+    // was left in (ios/main.m reads it too).
+    constexpr const char* kTitleFile = "title";
+#if TARGET_OS_IOS
+    // The launch data waiting for that start, which ios/main.m hands over in
+    // kLaunchDataVariable.
+    constexpr const char* kLaunchDataFile = "launch_data";
+#endif
+
+    const char* ShortName(const std::string& xex)
+    {
+        if (xex == "default.xex") return "sp";
+        if (xex == "default_mp.xex") return "mp";
+        return nullptr;
+    }
+
+    std::string LaunchHex()
+    {
+        std::string hex;
+        for (const uint8_t byte : install::LaunchData())
+        {
+            char text[3];
+            std::snprintf(text, sizeof(text), "%02x", byte);
+            hex += text;
+        }
+        return hex;
+    }
+
+    void RememberTitle(const std::string& xex)
+    {
+        if (const char* name = ShortName(xex)) std::ofstream(kTitleFile) << name << "\n";
+    }
+
+#if defined(__APPLE__) && !TARGET_OS_IOS
+    // A player's start of MW2.app runs the campaign's program; when the
+    // multiplayer was the last played, it becomes that one instead.
+    void ResumeLastTitle()
+    {
+        std::string last;
+        std::ifstream(kTitleFile) >> last;
+        const std::string other = last == "mp" ? "default_mp.xex" : last == "sp" ? "default.xex" : "";
+        if (other.empty() || other == kXex || std::getenv(kLaunchDataVariable)) return;
+        std::error_code ec;
+        const fs::path file = ProgramFile(other);
+        if (!fs::is_regular_file(file, ec)) return;
+        const std::string path = Utf8(file);
+        LOGI("the %s was played last: starting %s", last == "mp" ? "multiplayer" : "campaign", path.c_str());
+        std::fflush(nullptr);
+        char* const args[] = { const_cast<char*>(path.c_str()), nullptr };
+        execv(path.c_str(), args);
+        LOGW("cannot start %s: %s", path.c_str(), std::strerror(errno));
+    }
+#endif
 
     enum class Installed { Yes, No, Unreadable };
 
@@ -177,6 +246,9 @@ bool install::Prepare(int, char**, Launch& launch, int& exitCode)
     // Everything a player's copy keeps -- game/, saves/ -- is beside the executable.
     std::error_code ec;
     if (const fs::path folder = ExecutableFolder(); !folder.empty()) fs::current_path(folder, ec);
+#if defined(__APPLE__) && !TARGET_OS_IOS
+    ResumeLastTitle();
+#endif
 
     std::string error;
     switch (LoadInstalled(launch.image, error))
@@ -238,6 +310,12 @@ std::vector<uint8_t>& install::LaunchData()
 
 void install::SetNextTitle(const std::string& xex) { g_nextTitle = xex; }
 
+void install::SwitchTitle()
+{
+    LaunchData().clear();
+    SetNextTitle(std::string(kXex) == "default.xex" ? "default_mp.xex" : "default.xex");
+}
+
 void install::StartNextTitle()
 {
     if (g_nextTitle.empty()) return;
@@ -250,21 +328,22 @@ void install::StartNextTitle()
         LOGW("the title asked for %s: start that build yourself, a development run does not", g_nextTitle.c_str());
         return;
     }
-#ifdef MW2_USE_SDL
-    std::error_code ec;
-    fs::path file = fs::absolute(program, ec);
-#if defined(__APPLE__) && !TARGET_OS_IOS
-    if (const char* app = AppFor(g_nextTitle); app && !fs::is_regular_file(file, ec))
-        file = fs::absolute(fs::path(app) / "Contents" / "MacOS" / program, ec);
-#endif
-    if (!fs::is_regular_file(file, ec)) { ShowError(std::string(program) + " is not beside this program."); return; }
-    std::string hex;
-    for (const uint8_t byte : LaunchData())
+    RememberTitle(g_nextTitle);
+#if TARGET_OS_IOS
+    // The app holds both titles (ios/main.m) and cannot start itself again:
+    // the next title is the one it opens with the next time.
     {
-        char text[3];
-        std::snprintf(text, sizeof(text), "%02x", byte);
-        hex += text;
+        std::error_code ec;
+        const std::string hex = LaunchHex();
+        if (hex.empty()) fs::remove(kLaunchDataFile, ec);
+        else std::ofstream(kLaunchDataFile) << hex;
+        LOGI("%s starts the next time the app is opened", g_nextTitle.c_str());
     }
+#elif defined(MW2_USE_SDL)
+    std::error_code ec;
+    const fs::path file = ProgramFile(g_nextTitle);
+    if (!fs::is_regular_file(file, ec)) { ShowError(std::string(program) + " is not beside this program."); return; }
+    const std::string hex = LaunchHex();
     SDL_Environment* environment = SDL_GetEnvironment();
     if (hex.empty()) SDL_UnsetEnvironmentVariable(environment, kLaunchDataVariable);
     else SDL_SetEnvironmentVariable(environment, kLaunchDataVariable, hex.c_str(), true);

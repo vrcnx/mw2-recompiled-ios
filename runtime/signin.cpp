@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <random>
@@ -137,6 +138,27 @@ namespace
             id = text;
 #else
         std::ifstream("/etc/machine-id") >> id;
+#endif
+#ifdef __APPLE__
+        // macOS and iPadOS have no machine id a sandboxed app may read, so
+        // each install makes one and keeps it with the saves. Without it every
+        // Apple machine was machine 1: a profile copied from one to another
+        // kept its number, and the lan took the two for one player.
+        if (id.empty())
+        {
+            const std::filesystem::path file = kernel::SaveRoot() / "machine";
+            std::ifstream(file) >> id;
+            if (id.empty())
+            {
+                std::random_device random;
+                char made[17];
+                std::snprintf(made, sizeof made, "%08x%08x", random(), random());
+                id = made;
+                std::error_code ec;
+                std::filesystem::create_directories(file.parent_path(), ec);
+                std::ofstream(file) << id << "\n";
+            }
+        }
 #endif
         const uint64_t hash = id.empty() ? 0 : Fnv(id);
         return hash ? hash : 1;

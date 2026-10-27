@@ -1,7 +1,8 @@
-# The iOS/iPadOS app: a thin Xcode target around libmw2_ios.a, which CMake
-# builds (ios/build.sh; see ios/README.md). Generate the project with
+# The iOS/iPadOS app: a thin Xcode target, the loader in main.m, around the
+# two titles' frameworks, which ios/build.sh links from CMake's libmw2_ios.a
+# (see ios/README.md). Generate the project with
 # ios/build.sh, or `xcodegen generate --spec ios/project.yml` with MW2_IOS_TEAM
-# MW2_IOS_APP_ID, MW2_IOS_DISPLAY_NAME and MW2_IOS_TITLE set.
+# MW2_IOS_APP_ID, MW2_IOS_DISPLAY_NAME and MW2_IOS_FRAMEWORKS set.
 name: MW2
 options:
   deploymentTarget:
@@ -21,10 +22,6 @@ settings:
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_ENTITLEMENTS: MW2.entitlements
     ENABLE_BITCODE: NO
-    # CMake's merged archive for each SDK (ios/build.sh).
-    MW2_ARCHIVE[sdk=iphoneos*]: $(PROJECT_DIR)/../build-ios-${MW2_IOS_TITLE}/ios/libmw2_ios.a
-    MW2_ARCHIVE[sdk=iphonesimulator*]: $(PROJECT_DIR)/../build-iossim-${MW2_IOS_TITLE}/ios/libmw2_ios.a
-    OTHER_LDFLAGS: $(MW2_ARCHIVE) -lc++ -liconv
 targets:
   MW2:
     type: application
@@ -39,24 +36,14 @@ targets:
       # (git-ignored).
       - path: ${MW2_IOS_ASSETS}
     dependencies:
-      - sdk: AudioToolbox.framework
-      - sdk: AVFoundation.framework
-      - sdk: AVFAudio.framework
-      - sdk: CoreAudio.framework
-      - sdk: CoreBluetooth.framework
-      - sdk: CoreFoundation.framework
-      - sdk: CoreGraphics.framework
-      - sdk: CoreHaptics.framework
-      - sdk: CoreMedia.framework
-      - sdk: CoreMotion.framework
-      - sdk: CoreVideo.framework
+      # Loaded by main.m, one of the two, so linked by neither.
+      - framework: ${MW2_IOS_FRAMEWORKS}/MW2SP.framework
+        embed: true
+        link: false
+      - framework: ${MW2_IOS_FRAMEWORKS}/MW2MP.framework
+        embed: true
+        link: false
       - sdk: Foundation.framework
-      - sdk: GameController.framework
-      - sdk: IOSurface.framework
-      - sdk: Metal.framework
-      - sdk: QuartzCore.framework
-      - sdk: UIKit.framework
-      - sdk: UniformTypeIdentifiers.framework
     info:
       path: Info.plist
       properties:

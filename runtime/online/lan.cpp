@@ -16,18 +16,27 @@
 // player's party or lobby as soon as it is seen, as choosing a friend and
 // "Join Session" does on the console. The lobby's "Invite friends" invites
 // every player seen; a copy started with MW2_LAN_ACCEPT=1 accepts.
+//
+// MW2_LAN_PEERS=<addresses or names> (a Mac's "name.local" works) also sends
+// everything that is broadcast straight to those machines, for systems or
+// networks that drop broadcasts: an iPadOS app may only broadcast with Apple's
+// multicast entitlement. A machine heard from is added the same way, so naming
+// one side is enough for the two to find each other.
 #include "service.h"
 #include "../env.h"
 #include "../log.h"
 #include "../signin.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <deque>
 #include <map>
 #include <mutex>
 #include <random>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 #include <cstdlib>
 
@@ -41,6 +50,7 @@
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -230,6 +240,8 @@ namespace
     public:
         ~Lan() override
         {
+            stopping_ = true;
+            if (resolver_.joinable()) resolver_.join();
             if (own_ != kNoSocket) CloseSocket(own_);
             if (shared_ != kNoSocket) CloseSocket(shared_);
         }
@@ -254,7 +266,8 @@ namespace
             sockaddr_in bound{};
             socklen_t length = sizeof bound;
             getsockname(own_, reinterpret_cast<sockaddr*>(&bound), &length);
-            bound.sin_addr.s_addr = htonl(OwnAddress());
+            ownAddress_ = OwnAddress();
+            bound.sin_addr.s_addr = htonl(ownAddress_);
             id_ = IdOf(bound);
             instance_ = std::random_device{}();
             const signin::Player player = signin::First();
@@ -266,6 +279,18 @@ namespace
             name_ = name ? name : player.name;
             if (const char* join = env::Text("MW2_LAN_JOIN")) join_ = join;
             accept_ = env::Flag("MW2_LAN_ACCEPT");
+            if (const char* peers = env::Text("MW2_LAN_PEERS"))
+            {
+                std::string word;
+                for (const char* c = peers;; c++)
+                {
+                    if (*c && *c != ',' && *c != ' ' && *c != ';') { word += *c; continue; }
+                    if (!word.empty()) directNames_.push_back(word);
+                    word.clear();
+                    if (!*c) break;
+                }
+                if (!directNames_.empty()) resolver_ = std::thread([this] { ResolvePeers(); });
+            }
             char text[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &bound.sin_addr, text, sizeof text);
             LOGI("online: lan as \"%s\" at %s:%u, broadcasts on %u", name_.c_str(), text,
@@ -292,7 +317,10 @@ namespace
             everyone.sin_family = AF_INET;
             everyone.sin_addr.s_addr = htonl(INADDR_BROADCAST);
             everyone.sin_port = htons(sharedPort_);
-            return SendTo(everyone, fromPort, toPort, bytes, size);
+            const bool sent = SendTo(everyone, fromPort, toPort, bytes, size);
+            bool direct = false;
+            for (const sockaddr_in& to : DirectPeers()) direct |= SendTo(to, fromPort, toPort, bytes, size);
+            return sent || direct;
         }
 
         bool Receive(uint16_t port, online::Datagram& out) override
@@ -385,11 +413,67 @@ namespace
             everyone.sin_addr.s_addr = htonl(INADDR_BROADCAST);
             everyone.sin_port = htons(sharedPort_);
             SendDatagram(own_, &presence, sizeof presence, everyone);
+            for (const sockaddr_in& to : DirectPeers()) SendDatagram(own_, &presence, sizeof presence, to);
+        }
+
+        // A machine to reach without broadcasts (MW2_LAN_PEERS, or one heard
+        // from), at the port every copy shares.
+        void AddDirect(uint32_t address)
+        {
+            if (!address || address == ownAddress_ || (address >> 24) == 127) return;
+            std::lock_guard g(directLock_);
+            if (!direct_.insert(address).second) return;
+            in_addr text_address;
+            text_address.s_addr = htonl(address);
+            char text[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &text_address, text, sizeof text);
+            LOGI("online: lan reaches %s directly as well", text);
+        }
+
+        std::vector<sockaddr_in> DirectPeers()
+        {
+            std::lock_guard g(directLock_);
+            std::vector<sockaddr_in> out;
+            for (uint32_t address : direct_)
+            {
+                sockaddr_in to{};
+                to.sin_family = AF_INET;
+                to.sin_addr.s_addr = htonl(address);
+                to.sin_port = htons(sharedPort_);
+                out.push_back(to);
+            }
+            return out;
+        }
+
+        // Names are looked up off the title's threads (a ".local" name asks
+        // the network), and again now and then, as addresses change.
+        void ResolvePeers()
+        {
+            while (!stopping_)
+            {
+                for (const std::string& name : directNames_)
+                {
+                    addrinfo hints{};
+                    hints.ai_family = AF_INET;
+                    hints.ai_socktype = SOCK_DGRAM;
+                    addrinfo* found = nullptr;
+                    if (getaddrinfo(name.c_str(), nullptr, &hints, &found) != 0)
+                    {
+                        LOGW("online: lan cannot find %s on the network yet", name.c_str());
+                        continue;
+                    }
+                    for (addrinfo* at = found; at; at = at->ai_next)
+                        AddDirect(ntohl(reinterpret_cast<sockaddr_in*>(at->ai_addr)->sin_addr.s_addr));
+                    freeaddrinfo(found);
+                }
+                for (int i = 0; i < 150 && !stopping_; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
 
         void Heard(const sockaddr_in& from, const Presence& presence)
         {
             if (presence.instance == instance_) return;
+            AddDirect(ntohl(from.sin_addr.s_addr));
             const std::string name(presence.name, strnlen(presence.name, sizeof presence.name));
             Peer& peer = peers_[name];
             peer.id = IdOf(from);
@@ -476,6 +560,13 @@ namespace
         std::string join_;                     // MW2_LAN_JOIN, until joined
         bool accept_ = false;                  // MW2_LAN_ACCEPT
         std::deque<online::Invite> invites_;
+
+        uint32_t ownAddress_ = 0;
+        std::mutex directLock_;
+        std::set<uint32_t> direct_;            // host order
+        std::vector<std::string> directNames_; // MW2_LAN_PEERS
+        std::thread resolver_;
+        std::atomic<bool> stopping_{ false };
     };
 }
 
