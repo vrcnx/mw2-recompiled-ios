@@ -48,10 +48,4 @@ namespace install
     // The other executable next, asked for by the player rather than the
     // title: the campaign's for the multiplayer and the other way round.
     void SwitchTitle();
-
-#if defined(__APPLE__)
-    // macOS: replaces this program with the other title's when that is the
-    // one last played (MW2.app holds both). Returns when it is not.
-    void ResumeLastTitle(int argc, char** argv);
-#endif
 }

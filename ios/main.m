@@ -1,10 +1,11 @@
 // The iOS app's entry point. The app holds both of the game's executables,
 // each recompiled with its own copy of the runtime into a framework of its
 // own (ios/build.sh): MW2SP, the campaign and special ops, and MW2MP, the
-// multiplayer. Only one can be in a process, so this loads the one the
-// player's copy was left in -- Documents/title, written when the game asks
-// for its other executable (runtime/install/install.cpp) -- and hands the
-// process to it (mw2_ios_main, runtime/main.cpp).
+// multiplayer. Only one can be in a process, so this loads the campaign's,
+// whose main menu is where the game starts, or, once, the one the game asked
+// for before the app closed -- Documents/title, written when it asks for its
+// other executable (runtime/install/install.cpp) -- and hands the process to
+// it (mw2_ios_main, runtime/main.cpp).
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
 #include <stdio.h>
@@ -38,6 +39,7 @@ int main(int argc, char* argv[]) {
                                                     error:NULL]
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     const BOOL multiplayer = [title isEqualToString:@"mp"];
+    [[NSFileManager defaultManager] removeItemAtPath:Documents(@"title") error:NULL];
     // What the last title left for this one (XamLoaderSetLaunchData), once.
     NSString* data = [NSString stringWithContentsOfFile:Documents(@"launch_data")
                                                encoding:NSUTF8StringEncoding

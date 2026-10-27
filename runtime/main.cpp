@@ -315,11 +315,7 @@ extern "C" int mw2_ios_main(int argc, char** argv)
     return SDL_RunApp(argc, argv, AppleMain, nullptr);
 }
 #else
-int main(int argc, char** argv)
-{
-    install::ResumeLastTitle(argc, argv);
-    return AppleMain(argc, argv);
-}
+int main(int argc, char** argv) { return AppleMain(argc, argv); }
 #endif
 #else
 int main(int argc, char** argv) { return GuestMain(argc, argv); }

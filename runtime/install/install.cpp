@@ -4,7 +4,6 @@
 #include "spawn.h"
 #include "../log.h"
 
-#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,7 +16,6 @@
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #include <mach-o/dyld.h>
-#include <unistd.h>
 #endif
 #ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
@@ -149,15 +147,13 @@ namespace
     bool g_playerStart = false;
     std::string g_nextTitle;
 
-    // Which of the two executables the player's copy last ran ("sp" or "mp"),
-    // kept in its folder: the one app that holds both opens on the title it
-    // was left in (ios/main.m reads it too).
-    constexpr const char* kTitleFile = "title";
 #if TARGET_OS_IOS
-    // The launch data waiting for that start, which ios/main.m hands over in
-    // kLaunchDataVariable.
+    // The executable the app starts the next time it is opened ("sp" or
+    // "mp"), once, and the launch data waiting for it: ios/main.m reads both,
+    // hands the data over in kLaunchDataVariable and removes them, so the
+    // app otherwise opens on the campaign's main menu.
+    constexpr const char* kTitleFile = "title";
     constexpr const char* kLaunchDataFile = "launch_data";
-#endif
 
     const char* ShortName(const std::string& xex)
     {
@@ -165,6 +161,7 @@ namespace
         if (xex == "default_mp.xex") return "mp";
         return nullptr;
     }
+#endif
 
     std::string LaunchHex()
     {
@@ -178,36 +175,8 @@ namespace
         return hex;
     }
 
-    void RememberTitle(const std::string& xex)
-    {
-        if (const char* name = ShortName(xex)) std::ofstream(kTitleFile) << name << "\n";
-    }
-
 }
 
-#if defined(__APPLE__) && !TARGET_OS_IOS
-// A player's start of MW2.app runs the campaign's program; when the
-// multiplayer was the last played, it becomes that one instead. First thing
-// in main(): a window this one had opened would be left behind, its
-// fullscreen space showing black over the program that replaced it.
-void install::ResumeLastTitle(int argc, char** argv)
-{
-    if (!PlayerStart(argc, argv)) return;
-    std::error_code ec;
-    if (const fs::path folder = ExecutableFolder(); !folder.empty()) fs::current_path(folder, ec);
-    std::string last;
-    std::ifstream(kTitleFile) >> last;
-    const std::string other = last == "mp" ? "default_mp.xex" : last == "sp" ? "default.xex" : "";
-    if (other.empty() || other == kXex || std::getenv(kLaunchDataVariable)) return;
-    const fs::path file = ProgramFile(other);
-    if (!fs::is_regular_file(file, ec)) return;
-    const std::string path = Utf8(file);
-    std::fflush(nullptr);
-    char* const args[] = { const_cast<char*>(path.c_str()), nullptr };
-    execv(path.c_str(), args);
-    LOGW("cannot start %s: %s", path.c_str(), std::strerror(errno));
-}
-#endif
 
 namespace
 {
@@ -312,7 +281,21 @@ std::vector<uint8_t>& install::LaunchData()
     return data;
 }
 
-void install::SetNextTitle(const std::string& xex) { g_nextTitle = xex; }
+void install::SetNextTitle(const std::string& xex)
+{
+    g_nextTitle = xex;
+#if TARGET_OS_IOS && defined(MW2_USE_SDL)
+    // The app closes to start the other title, which looked like a crash:
+    // it says so first, and waits for the player.
+    if (g_playerStart && ShortName(xex))
+    {
+        const std::string text = std::string(xex == "default_mp.xex" ? "Multiplayer" : "The campaign and Special Ops") +
+            " will start the next time MW2 is opened. iPadOS does not let an app reopen itself, so MW2 "
+            "closes now: open it again from the Home Screen.";
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Modern Warfare 2", text.c_str(), nullptr);
+    }
+#endif
+}
 
 void install::SwitchTitle()
 {
@@ -332,11 +315,11 @@ void install::StartNextTitle()
         LOGW("the title asked for %s: start that build yourself, a development run does not", g_nextTitle.c_str());
         return;
     }
-    RememberTitle(g_nextTitle);
 #if TARGET_OS_IOS
     // The app holds both titles (ios/main.m) and cannot start itself again:
     // the next title is the one it opens with the next time.
     {
+        std::ofstream(kTitleFile) << ShortName(g_nextTitle) << "\n";
         std::error_code ec;
         const std::string hex = LaunchHex();
         if (hex.empty()) fs::remove(kLaunchDataFile, ec);

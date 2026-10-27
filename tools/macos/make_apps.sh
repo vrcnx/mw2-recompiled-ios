@@ -3,7 +3,7 @@
 # both of the game's programs in Contents/MacOS:
 #   mw2-sp   the campaign and Special Ops (build-release-<v>/mw2), what opens
 #   mw2-mp   the multiplayer (build-mp-release-<v>/mw2)
-# The app opens on the one last played, and the game's own menus switch
+# The app opens on the campaign's main menu, and the game's own menus switch
 # between them (runtime/install/install.cpp). The folder's game/, saves/,
 # bots/ and .env stay outside the app, which the runtime steps out of to find
 # them.

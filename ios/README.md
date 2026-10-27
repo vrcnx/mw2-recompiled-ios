@@ -76,10 +76,11 @@ this checkout (or pass `-DMW2_MOLTENVK=<its MoltenVK folder>`).
 The campaign (with Special Ops) and the multiplayer are separate executables
 on the disc, and each is built with its own copy of the runtime into a
 framework of its own, `MW2SP` and `MW2MP`. One app holds both: its loader
-(`main.m`) starts the one last played, recorded in `title` in the app's
-Documents. iOS apps cannot restart themselves, so choosing the other from the
-game's menus, or System > Go to Multiplayer / Go to Campaign and Special Ops
-in the settings menu, closes the app, and it opens there the next time. Saves,
+(`main.m`) starts the campaign's main menu. iOS apps cannot restart
+themselves, so choosing the other from the game's menus, or System > Go to
+Multiplayer / Go to Campaign and Special Ops in the settings menu, says so and
+closes the app; it opens there the next time (`title` in the app's
+Documents), and on the main menu after that. Saves,
 `.env` settings and logs live in the app's Documents too, which the Files app
 shows.
 
