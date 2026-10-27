@@ -308,11 +308,13 @@ static int AppleMain(int argc, char** argv)
 }
 
 #if TARGET_OS_IOS
-// The app's main (ios/main.m) lands here: UIKit's launch first, then
-// AppleMain on the main thread once the app has finished launching.
-extern "C" int mw2_ios_main(int argc, char** argv)
+// The app's launcher (ios/main.m) runs UIKit's launch through SDL, which the
+// app shares with this framework, and lands here on the main thread once
+// the player has chosen this title.
+extern "C" int mw2_ios_run(int argc, char** argv)
 {
-    return SDL_RunApp(argc, argv, AppleMain, nullptr);
+    SDL_SetMainReady();
+    return AppleMain(argc, argv);
 }
 #else
 int main(int argc, char** argv) { return AppleMain(argc, argv); }

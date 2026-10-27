@@ -18,7 +18,9 @@ is the host underneath it:
 - **The main thread.** UIKit takes windows and events only on the main thread,
   so the guest runs on a thread of its own and the main thread runs SDL's
   events and the presenter (`vk::RunMainThread`). The app enters through
-  `SDL_RunApp` (`ios/main.m` → `mw2_ios_main`).
+  `SDL_RunApp` in its launcher (`ios/main.m`), which calls the chosen title's
+  `mw2_ios_run`. SDL is a framework of its own (`SDL3.framework`) that the
+  launcher and both titles share.
 - **Pages.** Apple silicon's pages are 16 KB, and the GPU's watch on guest
   memory protects whole ones (`gpu/memory_watch.h`). A protection fault arrives
   as `SIGBUS` there.
@@ -75,12 +77,14 @@ this checkout (or pass `-DMW2_MOLTENVK=<its MoltenVK folder>`).
 
 The campaign (with Special Ops) and the multiplayer are separate executables
 on the disc, and each is built with its own copy of the runtime into a
-framework of its own, `MW2SP` and `MW2MP`. One app holds both: its loader
-(`main.m`) starts the campaign's main menu. iOS apps cannot restart
-themselves, so choosing the other from the game's menus, or System > Go to
-Multiplayer / Go to Campaign and Special Ops in the settings menu, says so and
-closes the app; it opens there the next time (`title` in the app's
-Documents), and on the main menu after that. Saves,
+framework of its own, `MW2SP` and `MW2MP`. One app holds both, and opens on
+a launcher (`main.m`): Campaign & Special Ops or Multiplayer, chosen with the
+d-pad or stick and A, or a tap. Only one title can be loaded in a process and
+iOS apps cannot restart themselves, so choosing the other from the game's
+menus, or System > Go to Multiplayer / Go to Campaign and Special Ops in the
+settings menu, says so and closes the app; the launcher has it chosen the
+next time. `MW2_MODE=sp|mp` in the environment (`devicectl device process
+launch --environment-variables`) skips the launcher. Saves,
 `.env` settings and logs live in the app's Documents too, which the Files app
 shows.
 

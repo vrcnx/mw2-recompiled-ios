@@ -108,6 +108,25 @@ for f in AudioToolbox AVFoundation AVFAudio CoreAudio CoreBluetooth CoreFoundati
 done
 export MW2_IOS_FRAMEWORKS="$root/$prefix-frameworks-$VERSION"
 mkdir -p "$MW2_IOS_FRAMEWORKS"
+
+# SDL, once, as a framework of its own: the app's launcher (main.m) starts
+# UIKit through it and shows its window, and the title it starts goes on with
+# the same SDL. The titles' builds link it statically; their frameworks are
+# linked against this one instead.
+sdl_source=
+for b in build-mp build build-mp-tu0 build-tu0; do
+    [ -d "$b/_deps/sdl3-src" ] && { sdl_source="$root/$b/_deps/sdl3-src"; break; }
+done
+[ -n "$sdl_source" ] || die "no SDL source: run the top-level build.sh first, which fetches it"
+cmake -S "$sdl_source" -B "$prefix-sdl3" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=$sysroot -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_C_FLAGS=$cpu -DCMAKE_OBJC_FLAGS=$cpu \
+    -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_FRAMEWORK=ON -DSDL_TEST_LIBRARY=OFF \
+    -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF > /dev/null
+cmake --build "$prefix-sdl3"
+rm -rf "$MW2_IOS_FRAMEWORKS/SDL3.framework"
+cp -R "$prefix-sdl3/SDL3.framework" "$MW2_IOS_FRAMEWORKS/"
+
 for title in sp mp; do
     build=$prefix-$title-$VERSION
     cmake -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -123,15 +142,20 @@ for title in sp mp; do
     # The title as a framework, which exports only its entry point and
     # vkGetInstanceProcAddr, which SDL looks for in the process to find the
     # statically linked MoltenVK: the two runtimes have every other name in
-    # common. Xcode signs it as it embeds it.
+    # common. Its archives are linked as they are, but for SDL's, the app's
+    # SDL3.framework instead. Xcode signs it as it embeds it.
     name=MW2$(echo "$title" | tr '[:lower:]' '[:upper:]')
     framework="$MW2_IOS_FRAMEWORKS/$name.framework"
     rm -rf "$framework" && mkdir -p "$framework"
+    archives=()
+    while IFS= read -r archive; do
+        case $archive in */libSDL3.a|"") ;; *) archives+=("$archive") ;; esac
+    done < "$build/ios/archives.txt"
     xcrun -sdk $sdk clang++ -target $triple -dynamiclib -o "$framework/$name" \
-        -install_name "@rpath/$name.framework/$name" \
-        -Wl,-u,_mw2_ios_main -Wl,-exported_symbol,_mw2_ios_main \
+        -install_name "@rpath/$name.framework/$name" -Wl,-rpath,@loader_path/.. \
+        -Wl,-u,_mw2_ios_run -Wl,-exported_symbol,_mw2_ios_run \
         -Wl,-exported_symbol,_vkGetInstanceProcAddr -Wl,-dead_strip \
-        "$build/ios/libmw2_ios.a" -liconv "${frameworks[@]}"
+        "${archives[@]}" -F "$MW2_IOS_FRAMEWORKS" -framework SDL3 -liconv "${frameworks[@]}"
     cat > "$framework/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

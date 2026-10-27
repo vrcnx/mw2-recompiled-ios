@@ -36,6 +36,9 @@ targets:
       # (git-ignored).
       - path: ${MW2_IOS_ASSETS}
     dependencies:
+      # The launcher's and the titles' SDL.
+      - framework: ${MW2_IOS_FRAMEWORKS}/SDL3.framework
+        embed: true
       # Loaded by main.m, one of the two, so linked by neither.
       - framework: ${MW2_IOS_FRAMEWORKS}/MW2SP.framework
         embed: true
@@ -44,6 +47,7 @@ targets:
         embed: true
         link: false
       - sdk: Foundation.framework
+      - sdk: UIKit.framework
     info:
       path: Info.plist
       properties:

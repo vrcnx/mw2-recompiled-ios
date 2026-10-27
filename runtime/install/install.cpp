@@ -148,10 +148,9 @@ namespace
     std::string g_nextTitle;
 
 #if TARGET_OS_IOS
-    // The executable the app starts the next time it is opened ("sp" or
-    // "mp"), once, and the launch data waiting for it: ios/main.m reads both,
-    // hands the data over in kLaunchDataVariable and removes them, so the
-    // app otherwise opens on the campaign's main menu.
+    // The executable the app's launcher (ios/main.m) has chosen the next time
+    // it is opened ("sp" or "mp"), and the launch data waiting for it, which
+    // the launcher hands over in kLaunchDataVariable.
     constexpr const char* kTitleFile = "title";
     constexpr const char* kLaunchDataFile = "launch_data";
 
@@ -289,9 +288,9 @@ void install::SetNextTitle(const std::string& xex)
     // it says so first, and waits for the player.
     if (g_playerStart && ShortName(xex))
     {
-        const std::string text = std::string(xex == "default_mp.xex" ? "Multiplayer" : "The campaign and Special Ops") +
-            " will start the next time MW2 is opened. iPadOS does not let an app reopen itself, so MW2 "
-            "closes now: open it again from the Home Screen.";
+        const std::string text = std::string("iPadOS does not let an app reopen itself, so MW2 closes now. Open it "
+            "again from the Home Screen: ") + (xex == "default_mp.xex" ? "Multiplayer" : "Campaign & Special Ops") +
+            " is chosen for you in the launcher.";
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Modern Warfare 2", text.c_str(), nullptr);
     }
 #endif
