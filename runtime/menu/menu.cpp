@@ -260,6 +260,11 @@ namespace
             "Every challenge done, and every title, emblem and killstreak unlocked. Weapons and their "
             "attachments and camouflage come with the challenges.",
             "MW2_CHEAT_UNLOCK_ALL", { { "Off", "" }, { "On", "1" } }, true));
+        list.push_back(Switch(4, "Everyone Unlocked",
+            "Max rank and everything unlocked for every player who signs in on this machine -- each "
+            "split-screen controller and any profile -- applied as the game loads their stats. Players "
+            "joining over the network get it from their own copy of this build.",
+            "MW2_UNLOCK_ALL_PLAYERS", { { "On", "" }, { "Off", "0" } }, true));
 
         // ---- System
         list.push_back(Action(5, "Apply and Quit",

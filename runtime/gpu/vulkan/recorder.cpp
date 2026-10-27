@@ -10,6 +10,7 @@
 // microsecond or two, and waking a sleeping thread costs more than that. The
 // recorder spins for a while before it sleeps, which it does between frames.
 #include "recorder.h"
+#include "../../platform.h"
 #include "../../diagnostics.h"
 #include "../../crash.h"
 #include "../../env.h"
@@ -74,6 +75,7 @@ namespace
     void Run()
     {
         crash::RegisterThread("recorder");
+        platform::InteractiveThreadPriority();
         uint8_t* const ring = q.ring;
         uint64_t at = q.made.load(std::memory_order_relaxed);
         uint64_t calls = 0;

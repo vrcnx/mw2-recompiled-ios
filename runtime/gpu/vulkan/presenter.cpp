@@ -1,4 +1,5 @@
 #include "presenter.h"
+#include "../../platform.h"
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -675,6 +676,7 @@ namespace
     void Waiter()
     {
         crash::RegisterThread("vulkan present wait");
+        platform::InteractiveThreadPriority();
         while (g.running.load(std::memory_order_relaxed))
         {
             uint64_t id = 0;

@@ -275,6 +275,10 @@ namespace
             f->writable = writable && (truncate || WantsToWrite(desiredAccess));
             if (!existed) fs::create_directories(resolved.parent_path(), ec);
 
+            // A player's multiplayer stats (offline package mpdata_<xuid>),
+            // opened to be read as he signs in.
+            if (existed && !truncate && resolved.filename().string().rfind("mpdata", 0) == 0)
+                kernel::UnlockStatsBeforeRead(resolved);
             const char* mode = truncate ? "w+b" : (f->writable ? "r+b" : "rb");
             f->handle = Open(resolved, mode);
             if (!f->handle) { NoteMissing(guestPath); return X_STATUS_OBJECT_NAME_NOT_FOUND; }

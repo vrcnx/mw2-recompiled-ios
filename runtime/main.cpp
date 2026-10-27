@@ -288,6 +288,8 @@ static int GuestMain(int argc, char** argv)
 // elsewhere; the main thread turns into the window's.
 static int AppleMain(int argc, char** argv)
 {
+    // The window's thread presents every frame.
+    platform::InteractiveThreadPriority();
     platform::GuestThread([argc, argv] {
         const int code = GuestMain(argc, argv);
         std::fflush(nullptr);

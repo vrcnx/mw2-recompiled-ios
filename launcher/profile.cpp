@@ -431,9 +431,10 @@ bool profile::SetPrestige(const Player& player, int prestige, std::string& error
                   std::clamp(prestige, 0, playerdata::kMaxPrestige));
 }
 
-bool profile::UnlockEverything(const Player& player, std::string& error)
+namespace
 {
-    return Change(player, error, [](Stats& stats, int) {
+    void UnlockAll(Stats& stats, int)
+    {
         for (const playerdata::Challenge& challenge : playerdata::kChallenges)
         {
             stats.Buffer()[playerdata::kChallengeState + challenge.index] = uint8_t(challenge.tiers + 1);
@@ -442,7 +443,26 @@ bool profile::UnlockEverything(const Player& player, std::string& error)
         for (uint16_t index : playerdata::kTitles) stats.SetBit(playerdata::kTitleUnlocked, index);
         for (uint16_t index : playerdata::kIcons) stats.SetBit(playerdata::kIconUnlocked, index);
         for (uint16_t index : playerdata::kKillstreaks) stats.SetBit(playerdata::kKillstreakUnlocked, index);
-    });
+    }
+}
+
+bool profile::UnlockEverything(const Player& player, std::string& error)
+{
+    return Change(player, error, UnlockAll);
+}
+
+profile::Unlocked profile::UnlockStatsFile(const fs::path& file, std::string& error)
+{
+    Stats stats;
+    if (!stats.Load(file)) return Unlocked::Unchanged;
+    const std::vector<uint8_t> before = stats.file;
+    if (stats.Get32(playerdata::kExperience) < playerdata::kMaxExperience)
+        stats.Put32(playerdata::kExperience, playerdata::kMaxExperience);
+    UnlockAll(stats, 0);
+    // Compared without the checksum, which only a change rewrites.
+    if (std::equal(before.begin() + stats.lead + 4, before.end(), stats.file.begin() + stats.lead + 4))
+        return Unlocked::Unchanged;
+    return stats.Save(file, error) ? Unlocked::Changed : Unlocked::Failed;
 }
 
 profile::Campaign profile::ReadCampaign()

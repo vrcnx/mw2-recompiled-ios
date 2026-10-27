@@ -67,6 +67,7 @@ void platform::SetThreadName(const char* name)
 }
 
 void platform::LowerThreadPriority() { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); }
+void platform::InteractiveThreadPriority() {}
 void platform::IdleThreadPriority() { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE); }
 
 // No symbols without a PDB: each frame as its offset in the executable, which
@@ -127,6 +128,7 @@ void platform::SetThreadName(const char* name) { pthread_setname_np(name); }
 // Apple schedules by quality of service, not by nice value or policy.
 void platform::LowerThreadPriority() { pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0); }
 void platform::IdleThreadPriority() { pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0); }
+void platform::InteractiveThreadPriority() { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0); }
 
 #else
 
@@ -142,6 +144,7 @@ void platform::SetThreadName(const char* name)
 }
 
 void platform::LowerThreadPriority() { setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), 10); }
+void platform::InteractiveThreadPriority() {}
 
 void platform::IdleThreadPriority()
 {
@@ -180,11 +183,8 @@ namespace
     void* RunGuestThread(void* body)
     {
         std::unique_ptr<std::function<void()>> owned(static_cast<std::function<void()>*>(body));
-#if TARGET_OS_IOS
-        // Left to itself iOS parks a new thread on the efficiency cores and
-        // throttles it first; every guest thread is on the frame's path.
-        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
-#endif
+        // Every guest thread is on the frame's path.
+        platform::InteractiveThreadPriority();
         (*owned)();
         return nullptr;
     }

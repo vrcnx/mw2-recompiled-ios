@@ -67,7 +67,14 @@ namespace
         uint32_t size = sizeof(path);
         if (_NSGetExecutablePath(path, &size) != 0) return {};
         std::error_code ec;
-        return fs::weakly_canonical(path, ec).parent_path();
+        const fs::path folder = fs::weakly_canonical(path, ec).parent_path();
+        // Packaged as <name>.app (tools/macos/make_apps.sh): the player's
+        // game/, saves/ and .env are beside the app, never inside it, where
+        // they would break its signature.
+        if (folder.filename() == "MacOS" && folder.parent_path().filename() == "Contents" &&
+            folder.parent_path().parent_path().extension() == ".app")
+            return folder.parent_path().parent_path().parent_path();
+        return folder;
 #else
         std::error_code ec;
         return fs::read_symlink("/proc/self/exe", ec).parent_path();
@@ -113,6 +120,16 @@ namespace
 #endif
         return nullptr;
     }
+
+#if defined(__APPLE__) && !TARGET_OS_IOS
+    // The app each executable is packaged in on macOS (tools/macos/make_apps.sh).
+    const char* AppFor(const std::string& xex)
+    {
+        if (xex == "default.xex") return "MW2 Campaign.app";
+        if (xex == "default_mp.xex") return "MW2 Multiplayer.app";
+        return nullptr;
+    }
+#endif
 
     constexpr const char* kLaunchDataVariable = "MW2_LAUNCH_DATA";
     bool g_playerStart = false;
@@ -235,7 +252,11 @@ void install::StartNextTitle()
     }
 #ifdef MW2_USE_SDL
     std::error_code ec;
-    const fs::path file = fs::absolute(program, ec);
+    fs::path file = fs::absolute(program, ec);
+#if defined(__APPLE__) && !TARGET_OS_IOS
+    if (const char* app = AppFor(g_nextTitle); app && !fs::is_regular_file(file, ec))
+        file = fs::absolute(fs::path(app) / "Contents" / "MacOS" / program, ec);
+#endif
     if (!fs::is_regular_file(file, ec)) { ShowError(std::string(program) + " is not beside this program."); return; }
     std::string hex;
     for (const uint8_t byte : LaunchData())

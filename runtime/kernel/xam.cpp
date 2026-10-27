@@ -12,6 +12,8 @@
 #include "../log.h"
 #include "../signin.h"
 #include "../online/service.h"
+#include "../env.h"
+#include "../../launcher/profile.h"
 
 #include <algorithm>
 #include <array>
@@ -727,6 +729,7 @@ namespace
         }
         std::vector<char> bytes;
         std::error_code ec;
+        if (!file.title && file.path.filename() == "mpdata") kernel::UnlockStatsBeforeRead(file.path);
         if (fs::exists(file.path, ec))
         {
             std::ifstream in(file.path, std::ios::binary);
@@ -855,6 +858,24 @@ namespace
             }
         }
         return XLiveBase(message, param1, param2);
+    }
+}
+
+void kernel::UnlockStatsBeforeRead(const fs::path& file)
+{
+    if (const char* on = env::Text("MW2_UNLOCK_ALL_PLAYERS"); on && !env::Flag("MW2_UNLOCK_ALL_PLAYERS"))
+        return;
+    std::string error;
+    switch (profile::UnlockStatsFile(file, error))
+    {
+    case profile::Unlocked::Changed:
+        LOGI("xam: everything unlocked in %s", file.string().c_str());
+        break;
+    case profile::Unlocked::Failed:
+        LOGW("xam: cannot unlock %s: %s", file.string().c_str(), error.c_str());
+        break;
+    case profile::Unlocked::Unchanged:
+        break;
     }
 }
 

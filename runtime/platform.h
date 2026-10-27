@@ -51,6 +51,9 @@ namespace platform
     void LowerThreadPriority();
     // Only the time nothing else wants.
     void IdleThreadPriority();
+    // On the frame's path: Apple's systems otherwise park a new thread on the
+    // efficiency cores and throttle it first. Nothing elsewhere.
+    void InteractiveThreadPriority();
 
     // The calling thread's host stack to stderr. The recompiled functions are
     // named sub_XXXXXXXX, so where symbols resolve this is the guest's stack.

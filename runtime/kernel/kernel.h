@@ -95,6 +95,11 @@ namespace kernel
     // the settings of a profile at the second to fourth controllers -- renamed
     // to another number, where that one has none yet (kernel/xam.cpp).
     void MovePlayerData(uint64_t from, uint64_t to);
+    // MW2_UNLOCK_ALL_PLAYERS (on unless 0): a multiplayer stats file is given
+    // max rank and every unlock just before the title reads it, so whoever
+    // signs in here -- every split-screen controller, any profile -- plays
+    // with everything (kernel/xam.cpp).
+    void UnlockStatsBeforeRead(const std::filesystem::path& file);
 
     // The one storage device this runtime offers. The title takes the id from the
     // device selector, hands it back in every content call and stores it in the

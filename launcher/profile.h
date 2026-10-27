@@ -52,6 +52,12 @@ namespace profile
     bool SetPrestige(const Player& player, int prestige, std::string& error);
     // Every challenge done, and every title, emblem and killstreak unlocked.
     bool UnlockEverything(const Player& player, std::string& error);
+    // Max rank and UnlockEverything in one stats file -- the offline package's
+    // or the online service's copy -- for the game to read as it signs a
+    // player in (MW2_UNLOCK_ALL_PLAYERS). A file that already has it all, or
+    // is not a stats file this version reads, is left alone: Unchanged.
+    enum class Unlocked { Unchanged, Changed, Failed };
+    Unlocked UnlockStatsFile(const std::filesystem::path& file, std::string& error);
     int MaxPrestige();
 
     // The campaign's progress, as the profile has it.
