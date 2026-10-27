@@ -459,14 +459,34 @@ namespace
     // Where the frame lands in a window of another shape: as large as fits
     // at the frame's own proportions, centred, the rest black. Nothing is
     // squashed, and the window can be any shape at all.
-    void Letterbox(uint32_t frameWidth, uint32_t frameHeight, VkOffset3D& from, VkOffset3D& to)
+    //
+    // MW2_FILL fills a screen of another shape instead (a MacBook's is 16:10
+    // and taller): "zoom" shows the middle of the frame at the screen's
+    // proportions, trimming its edges, and "stretch" stretches all of it.
+    // Read at every frame, so the settings menu changes it at once.
+    void Letterbox(uint32_t frameWidth, uint32_t frameHeight, VkOffset3D& from, VkOffset3D& to,
+                   VkOffset3D& sourceFrom, VkOffset3D& sourceTo)
     {
+        sourceFrom = { 0, 0, 0 };
+        sourceTo = { int32_t(frameWidth), int32_t(frameHeight), 1 };
+        const char* fill = env::Text("MW2_FILL");
+        const bool zoom = fill && std::strcmp(fill, "zoom") == 0;
         // A title told its display is 4:3 drew for one into its 16:9 buffer,
         // which the console's scaler stretched to the set: so does this.
-        if (display::FourByThree())
+        if (display::FourByThree() || zoom || (fill && std::strcmp(fill, "stretch") == 0))
         {
             from = { 0, 0, 0 };
             to = { int32_t(g.extent.width), int32_t(g.extent.height), 1 };
+            if (!zoom || display::FourByThree()) return;
+            const uint64_t byWidth = uint64_t(g.extent.width) * frameHeight;
+            const uint64_t byHeight = uint64_t(g.extent.height) * frameWidth;
+            uint32_t width = frameWidth, height = frameHeight;
+            if (byWidth > byHeight) height = uint32_t(uint64_t(frameWidth) * g.extent.height / g.extent.width);
+            else width = uint32_t(uint64_t(frameHeight) * g.extent.width / g.extent.height);
+            width = std::clamp(width, 1u, frameWidth);
+            height = std::clamp(height, 1u, frameHeight);
+            sourceFrom = { int32_t((frameWidth - width) / 2), int32_t((frameHeight - height) / 2), 0 };
+            sourceTo = { sourceFrom.x + int32_t(width), sourceFrom.y + int32_t(height), 1 };
             return;
         }
         const uint64_t byWidth = uint64_t(g.extent.width) * frameHeight;
@@ -897,9 +917,9 @@ namespace
             // paints over the middle, which is cheaper than working out the bars.
             VkImageBlit blit{};
             blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            blit.srcOffsets[1] = { int32_t(shown.width), int32_t(shown.height), 1 };
             blit.dstSubresource = blit.srcSubresource;
-            Letterbox(shown.width, shown.height, blit.dstOffsets[0], blit.dstOffsets[1]);
+            Letterbox(shown.width, shown.height, blit.dstOffsets[0], blit.dstOffsets[1],
+                      blit.srcOffsets[0], blit.srcOffsets[1]);
             const bool bars = blit.dstOffsets[0].x || blit.dstOffsets[0].y;
             if (bars)
             {

@@ -184,7 +184,16 @@ static int GuestMain(int argc, char** argv)
     // catches nothing.
     // Its folder is made first: a run started with a new folder named lost its
     // whole log to the terminal.
-    if (const char* logPath = env::Text("MW2_LOG_FILE"))
+    // A relative path is the player's folder's, as the other files are: on
+    // iOS the working folder is not the app's Documents yet.
+    std::string logFile;
+    if (const char* given = env::Text("MW2_LOG_FILE"))
+    {
+        logFile = given;
+        if (std::filesystem::path(logFile).is_relative() && install::PlayerStart(argc, argv))
+            logFile = (install::Folder(argc, argv) / logFile).string();
+    }
+    if (const char* logPath = logFile.empty() ? nullptr : logFile.c_str())
     {
         std::error_code ignored;
         if (const auto folder = std::filesystem::path(logPath).parent_path(); !folder.empty())
@@ -306,7 +315,11 @@ extern "C" int mw2_ios_main(int argc, char** argv)
     return SDL_RunApp(argc, argv, AppleMain, nullptr);
 }
 #else
-int main(int argc, char** argv) { return AppleMain(argc, argv); }
+int main(int argc, char** argv)
+{
+    install::ResumeLastTitle(argc, argv);
+    return AppleMain(argc, argv);
+}
 #endif
 #else
 int main(int argc, char** argv) { return GuestMain(argc, argv); }

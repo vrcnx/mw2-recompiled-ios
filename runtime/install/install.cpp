@@ -183,27 +183,34 @@ namespace
         if (const char* name = ShortName(xex)) std::ofstream(kTitleFile) << name << "\n";
     }
 
+}
+
 #if defined(__APPLE__) && !TARGET_OS_IOS
-    // A player's start of MW2.app runs the campaign's program; when the
-    // multiplayer was the last played, it becomes that one instead.
-    void ResumeLastTitle()
-    {
-        std::string last;
-        std::ifstream(kTitleFile) >> last;
-        const std::string other = last == "mp" ? "default_mp.xex" : last == "sp" ? "default.xex" : "";
-        if (other.empty() || other == kXex || std::getenv(kLaunchDataVariable)) return;
-        std::error_code ec;
-        const fs::path file = ProgramFile(other);
-        if (!fs::is_regular_file(file, ec)) return;
-        const std::string path = Utf8(file);
-        LOGI("the %s was played last: starting %s", last == "mp" ? "multiplayer" : "campaign", path.c_str());
-        std::fflush(nullptr);
-        char* const args[] = { const_cast<char*>(path.c_str()), nullptr };
-        execv(path.c_str(), args);
-        LOGW("cannot start %s: %s", path.c_str(), std::strerror(errno));
-    }
+// A player's start of MW2.app runs the campaign's program; when the
+// multiplayer was the last played, it becomes that one instead. First thing
+// in main(): a window this one had opened would be left behind, its
+// fullscreen space showing black over the program that replaced it.
+void install::ResumeLastTitle(int argc, char** argv)
+{
+    if (!PlayerStart(argc, argv)) return;
+    std::error_code ec;
+    if (const fs::path folder = ExecutableFolder(); !folder.empty()) fs::current_path(folder, ec);
+    std::string last;
+    std::ifstream(kTitleFile) >> last;
+    const std::string other = last == "mp" ? "default_mp.xex" : last == "sp" ? "default.xex" : "";
+    if (other.empty() || other == kXex || std::getenv(kLaunchDataVariable)) return;
+    const fs::path file = ProgramFile(other);
+    if (!fs::is_regular_file(file, ec)) return;
+    const std::string path = Utf8(file);
+    std::fflush(nullptr);
+    char* const args[] = { const_cast<char*>(path.c_str()), nullptr };
+    execv(path.c_str(), args);
+    LOGW("cannot start %s: %s", path.c_str(), std::strerror(errno));
+}
 #endif
 
+namespace
+{
     enum class Installed { Yes, No, Unreadable };
 
     // The title's image from game/, if the executable there is the one this
@@ -246,9 +253,6 @@ bool install::Prepare(int, char**, Launch& launch, int& exitCode)
     // Everything a player's copy keeps -- game/, saves/ -- is beside the executable.
     std::error_code ec;
     if (const fs::path folder = ExecutableFolder(); !folder.empty()) fs::current_path(folder, ec);
-#if defined(__APPLE__) && !TARGET_OS_IOS
-    ResumeLastTitle();
-#endif
 
     std::string error;
     switch (LoadInstalled(launch.image, error))

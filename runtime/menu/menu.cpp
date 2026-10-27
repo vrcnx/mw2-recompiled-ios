@@ -176,6 +176,10 @@ namespace
                 { "16:9", "" }, { "4:3 (fill)", "4:3" },
 #endif
             }, true));
+        list.push_back(Switch(0, "Screen Fill",
+            "Fit shows the whole picture, with bars where the screen is another shape. Zoom fills the "
+            "screen by trimming the picture's edges; Stretch fills it by stretching the picture.",
+            "MW2_FILL", { { "Fit", "" }, { "Zoom", "zoom" }, { "Stretch", "stretch" } }, false));
         list.push_back(Switch(0, "Resolution",
             "How many times the console's 1280x720 the game is drawn at, before it is fitted to the screen. "
             "Sharper at 2x; 3x asks a lot of the graphics chip.",

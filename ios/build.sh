@@ -120,14 +120,17 @@ for title in sp mp; do
         ${fetched[@]+"${fetched[@]}"} > /dev/null
     cmake --build "$build" --target mw2_ios
 
-    # The title as a framework, which exports only its entry point: the two
-    # runtimes have every other name in common. Xcode signs it as it embeds it.
+    # The title as a framework, which exports only its entry point and
+    # vkGetInstanceProcAddr, which SDL looks for in the process to find the
+    # statically linked MoltenVK: the two runtimes have every other name in
+    # common. Xcode signs it as it embeds it.
     name=MW2$(echo "$title" | tr '[:lower:]' '[:upper:]')
     framework="$MW2_IOS_FRAMEWORKS/$name.framework"
     rm -rf "$framework" && mkdir -p "$framework"
     xcrun -sdk $sdk clang++ -target $triple -dynamiclib -o "$framework/$name" \
         -install_name "@rpath/$name.framework/$name" \
-        -Wl,-u,_mw2_ios_main -Wl,-exported_symbol,_mw2_ios_main -Wl,-dead_strip \
+        -Wl,-u,_mw2_ios_main -Wl,-exported_symbol,_mw2_ios_main \
+        -Wl,-exported_symbol,_vkGetInstanceProcAddr -Wl,-dead_strip \
         "$build/ios/libmw2_ios.a" -liconv "${frameworks[@]}"
     cat > "$framework/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>

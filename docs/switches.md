@@ -26,6 +26,7 @@ them as unset whatever the environment says, and also drops the keys `F5`, `F7`,
 |---|---|---|
 | `MW2_WINDOW=0\|1` | R | the window, which every build opens; `MW2_WINDOW=0` keeps it shut, for a headless run. Closing it ends the run as `MW2_RUN_SECONDS` does, with the reports. The frame keeps its proportions in any window shape |
 | `MW2_FULLSCREEN=1` | R | starts fullscreen, borderless at the desktop's resolution. `F8` toggles it |
+| `MW2_FILL=zoom\|stretch` | | fills a screen of another shape than the picture: `zoom` trims the picture's edges, `stretch` stretches it. Unset, the whole picture shows with bars. The settings menu's Display > Screen Fill |
 | `MW2_LOG_FILE=<path>` | R | writes the log there, creating its folder. The log goes to stderr, so `> file` does not catch it. A title started from the other one's menus writes on in the same file |
 | `MW2_REPORT=1` | R | what a bug report needs, as the launcher's REPORT A BUG sets it: the log names the graphics driver and ends with the run's frame rate, frame time spread and what was compiled at a draw ([building.md](building.md)) |
 | `MW2_LOG_TIME=1` | | stamps every log line with the time since start |

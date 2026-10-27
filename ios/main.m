@@ -21,7 +21,9 @@ static NSString* Documents(NSString* name) {
 static MainFunction Load(NSString* framework) {
   NSString* path = [[[NSBundle mainBundle] privateFrameworksPath]
       stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.framework/%@", framework, framework]];
-  void* handle = dlopen(path.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
+  // Global: SDL finds MoltenVK's vkGetInstanceProcAddr among the process's
+  // symbols.
+  void* handle = dlopen(path.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL);
   if (!handle) {
     fprintf(stderr, "cannot load %s: %s\n", path.UTF8String, dlerror());
     return NULL;
